@@ -59,8 +59,8 @@ public:
 
     ~TigaYcsbClient() override {
         delete txnGen_;
-        delete coord_;
         delete info_;
+        delete coord_;
         delete comm_;
     }
 
