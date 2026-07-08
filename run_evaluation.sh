@@ -29,7 +29,7 @@ echo "===================================================="
 echo "1. Rebuilding Docker Image for Tiga/Calvin/Detock..."
 echo "===================================================="
 cd "$TIGA_DIR"
-docker build -t tiga-suite .
+docker build -t 0track/tiga-suite .
 
 echo ""
 echo "===================================================="

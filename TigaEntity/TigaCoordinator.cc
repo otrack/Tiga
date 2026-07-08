@@ -1,3 +1,4 @@
+#include <iomanip>
 #include "TigaCoordinator.h"
 
 TigaCoordinator::TigaCoordinator(const uint32_t coordinatorId,
@@ -320,6 +321,8 @@ GlobalInfo::GlobalInfo(const uint32_t coordinatorId, const uint32_t shardNum,
       comm_(comm) {
    markTime_ = 0;
    fastReplyNum2_ = 0;
+   nFastCommits_ = 0;
+   nSlowCommits_ = 0;
    debug_ = false;
    LOG(INFO) << "coordiantorId=" << coordinatorId_ << "\tcap=" << cap_ << "\t"
              << "initBound=" << initBound_ << "\t"
@@ -560,6 +563,14 @@ void GlobalInfo::CheckQuorum() {
    std::vector<uint32_t> coordReqIdCommitted;
    // LOG(INFO) << "quorumSet =" << quorumSets_.size();
    if (GetMicrosecondTimestamp() - markTime_ >= 1000 * 1000) {
+      uint64_t fast = nFastCommits_.load();
+      uint64_t slow = nSlowCommits_.load();
+      uint64_t total = fast + slow;
+      double ratio = total > 0 ? (100.0 * fast / total) : 0.0;
+      LOG(INFO) << "[FastPathRatio] fast=" << fast
+                << " slow=" << slow
+                << " total=" << total
+                << " fast_pct=" << std::fixed << std::setprecision(1) << ratio << "%";
       LOG(INFO) << "quorumSet =" << quorumSets_.size();
       if (quorumSets_.size() > 0) {
          LOG(INFO) << "--minReqId=" << quorumSets_.begin()->first;
@@ -581,8 +592,16 @@ void GlobalInfo::CheckQuorum() {
       if (committedCoordReqIds_.find(kv.first) != committedCoordReqIds_.end()) {
          // already committed
          coordReqIdCommitted.push_back(kv.first);
-      } else if (isTxnCommitted(kv.second) == 0) {
-         coordReqIdCommitted.push_back(kv.first);
+      } else {
+         int commitStatus = isTxnCommitted(kv.second);
+         if (commitStatus > 0) {
+            coordReqIdCommitted.push_back(kv.first);
+            if (commitStatus == 1) {
+               nFastCommits_++;
+            } else {
+               nSlowCommits_++;
+            }
+         }
       }
       // else {
       //    if (uncommittedCnters_.find(kv.first) == uncommittedCnters_.end()) {
@@ -671,6 +690,7 @@ int GlobalInfo::isTxnCommitted(TigaFastReplyQuorum& q) {
    // LOG(INFO) << "fastQuorumSize=" << fastQuorumSize
    //           << "--slowQuorumSize=" << slowQuorumSize;
    TigaCoordinator* coord = q.coord_;
+   bool hasSlowShard = false;
    for (auto& sId : coord->targetShards_) {
       uint32_t validFastReplies = 0;
       uint32_t validSlowReplies = 0;
@@ -730,11 +750,6 @@ int GlobalInfo::isTxnCommitted(TigaFastReplyQuorum& q) {
              syncedLogId >= leaderFastReply.logId_) {
             // Non-speculative logs
             validSlowReplies++;
-            // if (leaderFastReply.logId_ % 10000 == 1) {
-            //    LOG(INFO) << "logId=" << leaderFastReply.logId_
-            //              << "\t rid =" << rid
-            //              << "-- syncedLogId=" << syncedLogId;
-            // }
          } else if (leaderFastReply.specLogId_ > 0 &&
                     syncedSpecLogId >= leaderFastReply.specLogId_) {
             validSlowReplies++;
@@ -743,20 +758,15 @@ int GlobalInfo::isTxnCommitted(TigaFastReplyQuorum& q) {
 
       if (validFastReplies < fastQuorumSize &&
           validSlowReplies + 1 < slowQuorumSize) {
-         // LOG(INFO) << "txnId=" << coord->requestIdByClient_ << "--"
-         //           << "sid=" << sId
-         //           << "--Fast size=" << q.fastReplies_[sId].size() << ""
-         //           << "--Slow Size=" << validSlowReplies
-         //           << "--leaderLogId=" << leaderFastReply.logId_
-         //           << "--R2 syncedLogId=" << currentSyncedLogIds_[sId][2];
          return -3;
-      } else {
-         // LOG(INFO) << "validFastReplies=" << validFastReplies
-         //           << "\t validSlowReplies=" << validSlowReplies;
+      }
+      
+      if (validFastReplies < fastQuorumSize) {
+         hasSlowShard = true;
       }
    }
 
-   return 0;
+   return hasSlowShard ? 2 : 1;
 }
 
 int GlobalInfo::isTxnCommittedDebug(TigaFastReplyQuorum& q) { return 0; }

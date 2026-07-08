@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   server-0:
-    image: tiga-suite
+    image: 0track/tiga-suite
     container_name: server-0
     network_mode: host
     environment:
@@ -14,7 +14,7 @@ services:
     restart: always
 
   server-1:
-    image: tiga-suite
+    image: 0track/tiga-suite
     container_name: server-1
     network_mode: host
     environment:
@@ -26,7 +26,7 @@ services:
     restart: always
 
   server-2:
-    image: tiga-suite
+    image: 0track/tiga-suite
     container_name: server-2
     network_mode: host
     environment:
