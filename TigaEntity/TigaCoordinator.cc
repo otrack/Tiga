@@ -51,6 +51,7 @@ void TigaCoordinator::Dispatch() {
       rrr::FutureAttr fuattr;
       std::function<void(Future*)> cb =
           [this, currentPhase /**pass by value */](Future* fu) {
+             if (fu->get_error_code() != 0) return;
              TigaDispatchReply rep;
              fu->get_reply() >> rep;
              this->OnDispatchReply(currentPhase, rep);
@@ -140,6 +141,7 @@ void TigaCoordinator::Launch() {
          rrr::FutureAttr fuattr;
          std::function<void(Future*)> cb =
              [this, currentPhase /**pass by value */](Future* fu) {
+                if (fu->get_error_code() != 0) return;
                 TigaReply rep;
                 fu->get_reply() >> rep;
                 this->OnFastReply(currentPhase, rep);
@@ -539,6 +541,7 @@ void GlobalInfo::IssueReconcliationRequest(TigaFastReplyQuorum& q,
 
       rrr::FutureAttr fuattr;
       std::function<void(Future*)> cb = [this, coord](Future* fu) {
+         if (fu->get_error_code() != 0) return;
          TigaReply rep;
          fu->get_reply() >> rep;
          replyQu_.enqueue({rep, coord});
@@ -766,6 +769,7 @@ void GlobalInfo::InquireServerSyncStatus() {
       for (uint32_t rid = 0; rid < replicaNum_; rid++) {
          rrr::FutureAttr fuattr;
          std::function<void(Future*)> cb = [this](Future* fu) {
+            if (fu->get_error_code() != 0) return;
             TigaServerSyncStatusReply rep;
             fu->get_reply() >> rep;
             if (rep.status_ == STATUS_FAILING ||

@@ -60,6 +60,7 @@ void DetockCoordinator::Dispatch() {
       rrr::FutureAttr fuattr;
       std::function<void(Future*)> cb =
           [this, currentPhase /**pass by value */](Future* fu) {
+             if (fu->get_error_code() != 0) return;
              // LOG(INFO) << "COme to reply";
              DetockDispatchReply rep;
              fu->get_reply() >> rep;
@@ -77,6 +78,7 @@ void DetockCoordinator::Launch() {
    rrr::FutureAttr fuattr;
    std::function<void(Future*)> cb =
        [this, currentPhase /**pass by value */](Future* fu) {
+          if (fu->get_error_code() != 0) return;
           DetockReply rep;
           fu->get_reply() >> rep;
           this->onReply(currentPhase, rep);

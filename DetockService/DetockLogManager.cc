@@ -3,14 +3,19 @@
 DetockLogManager::DetockLogManager(const std::string& serverName,
                                    StateMachine* sm)
     : serverName_(serverName), sm_(sm) {
-   detockLogList_.reserve(1000 * 1000 * 1000ul);
-   detockLogList_.push_back(NULL);  // index-0 is dummy
-   preparedLogId_ = 0;
-   committedLogId_ = 0;
-   pendingCommitPoint_ = 0;
-   viewId_ = 0;  // ViewChange not implemented for Detock
+    detockLogList_.reserve(1000 * 1000 * 1000ul);
+    detockLogList_.push_back(NULL);  // index-0 is dummy
+    preparedLogId_ = 0;
+    committedLogId_ = 0;
+    pendingCommitPoint_ = 0;
+    viewId_ = 0;  // ViewChange not implemented for Detock
 
-   logMangerRPCPoll_ = new PollMgr(2);
+    for (uint32_t r = 0; r < MAX_REPLICA_NUM; r++) {
+       logManagerRPCClients_[r] = nullptr;
+       logManagerProxies_[r] = nullptr;
+    }
+
+    logMangerRPCPoll_ = new PollMgr(2);
    YAML::Node config = sm_->Config();
    LOG(INFO) << "Fill Addrs ShardNum="<< sm_->ShardNum()
       <<"\t ReplicaNum="<<sm_->ReplicaNum();
@@ -72,6 +77,12 @@ void DetockLogManager::onDetockPaxosAppend(const DetockPaxosAppend& req) {
       LOG(ERROR) << "View MisMatch, View Change not implemented for Detock";
       return;
    }
+
+   uint32_t leaderId = LeaderReplicaId();
+   while (logManagerProxies_[leaderId] == nullptr) {
+      usleep(50000); // 50ms
+   }
+
    std::lock_guard<std::mutex> lk(logMtx_);
    if (preparedLogId_ + 1 == req.batch_.batchId_) {
       DetockBatch* batch = new DetockBatch(req.batch_);

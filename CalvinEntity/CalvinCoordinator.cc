@@ -98,6 +98,7 @@ void CalvinCoordinator::Launch() {
    rrr::FutureAttr fuattr;
    std::function<void(Future*)> cb =
        [this, currentPhase /**pass by value */](Future* fu) {
+          if (fu->get_error_code() != 0) return;
           CalvinReply rep;
           fu->get_reply() >> rep;
           this->onReply(currentPhase, rep);
@@ -120,6 +121,7 @@ void CalvinCoordinator::Dispatch() {
       rrr::FutureAttr fuattr;
       std::function<void(Future*)> cb =
           [this, currentPhase /**pass by value */](Future* fu) {
+             if (fu->get_error_code() != 0) return;
              // LOG(INFO) << "COme to reply";
              CalvinDispatchReply rep;
              fu->get_reply() >> rep;

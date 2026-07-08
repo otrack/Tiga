@@ -8,7 +8,7 @@ Marshal& operator<<(Marshal& m, const CalvinRequest& req) {
    uint32_t sz = req.ws_.size();
    m << req.clientId_ << req.reqId_ << req.txnType_ << req.designateShardId_
      << req.designateReplicaId_ << sz;
-   if (req.txnType_ == TXN_TYPE::MICRO_TXN) {
+   if (req.txnType_ == TXN_TYPE::MICRO_TXN || req.txnType_ == 2 || req.txnType_ == 3) {
       // only care about keys
       for (auto& kv : req.ws_) {
          m << kv.first;
@@ -33,7 +33,7 @@ Marshal& operator>>(Marshal& m, CalvinRequest& req) {
    for (uint32_t i = 0; i < sz; i++) {
       int32_t k;
       Value v;
-      if (req.txnType_ == TXN_TYPE::MICRO_TXN) {
+      if (req.txnType_ == TXN_TYPE::MICRO_TXN || req.txnType_ == 2 || req.txnType_ == 3) {
          m >> k;
          req.ws_[k].set_i32(0);  // value has no use
       } else if (req.txnType_ > TXN_TYPE::TPCC_TXN_MIN &&

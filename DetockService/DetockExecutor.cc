@@ -568,6 +568,9 @@ void DetockExecutor::ExecuteTd() {
          for (auto& txnKey : *txnKeys) {
             // Executel
             DetockEntry* entry = GetEntry(localEntryMap_, txnKey);
+            if (entry == NULL) {
+               continue;
+            }
             entry->reply_ = new DetockReply();
             entry->reply_->owd_ = entry->owd_;
             // LOG(INFO) << "entry owd =" << entry->owd_;

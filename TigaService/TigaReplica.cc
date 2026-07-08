@@ -1159,6 +1159,7 @@ void TigaReplica::onNormalRequest(const TigaReq& req, TigaReply* rep,
    if (insertedCmd != cmd) {
       // duplicate one, delete the newly created cmd
       delete cmd;
+      cmd = insertedCmd;
    }
 
    TigaLogEntry* entry = new TigaLogEntry();
