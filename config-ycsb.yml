@@ -69,7 +69,7 @@ clockOffset:
   mean: 0
   std: 0
 spec_exec: false
-preventive: false
+preventive: true
 nezha-recorder: 127.0.0.1:41237
 owd_delta_us: 10000
 owd_estimate_percentile: 50
