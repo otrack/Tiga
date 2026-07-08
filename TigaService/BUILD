@@ -1,3 +1,5 @@
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_binary")
+
 
 cc_library(
     name = "TigaMessage",
@@ -70,7 +72,8 @@ cc_library(
         ":TigaMessage",
         ":TigaService",
         "//StateMachine:MicroStateMachine",
-        "//StateMachine:TPCCStateMachine"
+        "//StateMachine:TPCCStateMachine",
+        "//StateMachine:YCSBStateMachine"
     ],
     visibility = ["//visibility:public"],
 )

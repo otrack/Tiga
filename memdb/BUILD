@@ -1,3 +1,5 @@
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_binary")
+
 cc_library(
     name = "murmurhash_lib",
     srcs = ["MurmurHash3.cc"],

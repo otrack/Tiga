@@ -19,6 +19,8 @@ static void signal_handler(int sig) {
    Pthread_mutex_unlock(&g_stop_mutex);
 }
 
+#include "StateMachine/YCSBStateMachine.h"
+
 int main(int argc, char** argv) {
    gflags::ParseCommandLineFlags(&argc, &argv, true);
    google::InitGoogleLogging(argv[0]);
@@ -57,6 +59,9 @@ int main(int argc, char** argv) {
                                            replicaNum, config);
    } else if (workloadStr == "tpcc") {
       stateMachine = new TPCCStateMachine(shardId, replicaId, shardNum,
+                                          replicaNum, config);
+   } else if (workloadStr == "ycsb") {
+      stateMachine = new YCSBStateMachine(shardId, replicaId, shardNum,
                                           replicaNum, config);
    } else {
       LOG(ERROR) << workloadStr << "--not implemented yet";

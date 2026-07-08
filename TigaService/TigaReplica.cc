@@ -80,6 +80,9 @@ TigaReplica::TigaReplica(const std::string& serverName,
    } else if (workloadStr == "tpcc") {
       sm_ = new TPCCStateMachine(shardId_, replicaId_, shardNum_, replicaNum_,
                                  config);
+   } else if (workloadStr == "ycsb") {
+      sm_ = new YCSBStateMachine(shardId_, replicaId_, shardNum_, replicaNum_,
+                                 config);
    } else {
       LOG(ERROR) << workloadStr << "--not implemented yet";
       assert(0);

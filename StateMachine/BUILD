@@ -1,3 +1,5 @@
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_binary")
+
 
 
 cc_library(
@@ -74,3 +76,15 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
 )
+
+
+cc_library(
+    name = "YCSBStateMachine",
+    srcs = ["YCSBStateMachine.cc"],
+    hdrs = ["YCSBStateMachine.h"],
+    deps= [
+        ":StateMachine",
+    ],
+    visibility = ["//visibility:public"],
+)
+

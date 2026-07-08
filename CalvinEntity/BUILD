@@ -1,3 +1,5 @@
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_binary")
+
 cc_binary(
      name = "CalvinServer",
      srcs = ["CalvinServer.cc"],
@@ -5,6 +7,7 @@ cc_binary(
         "//CalvinService:CalvinServiceImpl",
         "//CalvinService:CalvinSequencerServiceImpl",
         "//CalvinService:CalvinSchedulerServiceImpl",
+        "//StateMachine:YCSBStateMachine",
         "//rrr:rrrLib"
      ],
      copts = [

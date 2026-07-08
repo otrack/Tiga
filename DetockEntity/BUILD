@@ -1,3 +1,5 @@
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_binary")
+
 cc_binary(
      name = "DetockServer",
      srcs = ["DetockServer.cc"],
@@ -5,6 +7,7 @@ cc_binary(
         "//DetockService:DetockServiceImpl",
         "//DetockService:DetockSequencerServiceImpl",
         "//DetockService:DetockLogManagerServiceImpl",
+        "//StateMachine:YCSBStateMachine",
         "//rrr:rrrLib"
      ],
      copts = [

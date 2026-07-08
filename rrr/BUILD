@@ -1,3 +1,5 @@
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_binary")
+
 cc_library(
     name = "rrrLib",
     srcs = glob([
@@ -19,7 +21,7 @@ cc_library(
       "-L/usr/local/lib", 
       "-L/usr/lib/x86_64-linux-gnu",
       "-pthread",
-       "-lboost_system", "-lboost_filesystem", 
+       "-lboost_filesystem", 
        "-lboost_coroutine", "-lboost_context"
     ],
     visibility = ["//visibility:public"],

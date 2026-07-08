@@ -2,6 +2,7 @@
 #include "Common.h"
 #include "StateMachine/MicroStateMachine.h"
 #include "StateMachine/TPCCStateMachine.h"
+#include "StateMachine/YCSBStateMachine.h"
 #include "TigaService/TigaMessage.h"
 #include "TigaService/TigaService.h"
 using namespace TigaRPC;
