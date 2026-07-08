@@ -22,3 +22,6 @@ ncc/janus/src/rrr/pylib/simplerpc/_pyrpc.cpython-310-x86_64-linux-gnu.so
 rrr/pylib/simplerpcgen/*.pyc
 rrr/pylib/*/*.pyc
 rrr/pylib/*/__pycache__/*
+
+MODULE.bazel.lock
+.idea/

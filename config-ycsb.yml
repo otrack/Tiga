@@ -1,0 +1,76 @@
+bench:
+  workload: ycsb
+  scale: 1
+  weight:
+    read: 0.5
+    write: 0.5
+  population:
+    branch: 10000
+    teller: 10000
+    customer: 10000
+  dist: zipf
+  coefficient: 0.9
+
+schema:
+  - name: branch
+    column:
+      - { name: branch_id, type: integer, primary: true }
+      - { name: balance, type: integer }
+  - name: teller
+    column:
+      - { name: teller_id, type: integer, primary: true }
+      - { name: branch_id, type: integer, foreign: branch.branch_id }
+  - name: customer
+    column:
+      - { name: customer_id, type: integer, primary: true }
+      - { name: branch_id, type: integer, foreign: branch.branch_id }
+      - { name: balance, type: integer }
+
+sharding:
+  branch: MOD
+  teller: MOD
+  customer: MOD
+
+client: { rate: 500, type: open, forwarding: false }
+n_concurrent: 1
+host:
+  janus-lan-server-0000: 127.0.0.1
+  janus-lan-server-0100: 127.0.0.1
+  janus-lan-server-0200: 127.0.0.1
+  janus-lan-proxy-0000: 127.0.0.1
+mode: { ab: brq, batch: false, cc: brq, ongoing: 1, retry: 20 }
+process:
+  janus-lan-server-0000: janus-lan-server-0000
+  janus-lan-server-0100: janus-lan-server-0100
+  janus-lan-server-0200: janus-lan-server-0200
+  janus-lan-proxy-0000: janus-lan-proxy-0000
+site:
+  client:
+    - - janus-lan-proxy-0000
+  server:
+    - - janus-lan-server-0000:10000
+      - janus-lan-server-0100:20000
+      - janus-lan-server-0200:30000
+
+server_initial_bound:
+  - 100
+  - 100
+  - 100
+server_bound_cap:
+  - 400000
+  - 400000
+  - 400000
+designate_replica_id:
+  - 0
+  - 1
+  - 2
+
+clockOffset:
+  mean: 0
+  std: 0
+spec_exec: false
+preventive: false
+nezha-recorder: 127.0.0.1:41237
+owd_delta_us: 10000
+owd_estimate_percentile: 50
+owdDeltaUs: 10000

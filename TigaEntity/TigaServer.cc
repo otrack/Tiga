@@ -22,9 +22,11 @@ static void signal_handler(int sig) {
 }
 
 int main(int argc, char** argv) {
-   gflags::ParseCommandLineFlags(&argc, &argv, true);
-   google::InitGoogleLogging(argv[0]);
-   LOG(INFO) << "Start";
+    setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stderr, NULL, _IONBF, 0);
+    gflags::ParseCommandLineFlags(&argc, &argv, true);
+    google::InitGoogleLogging(argv[0]);
+    LOG(INFO) << "Start";
 
    YAML::Node config = YAML::LoadFile(FLAGS_config);
    // uint32_t shardNum = config["site"]["server"].size();

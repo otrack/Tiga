@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  server-0:
+    image: tiga-suite
+    container_name: server-0
+    network_mode: host
+    environment:
+      - PROTOCOL=${PROTOCOL:-tiga}
+      - SERVER_NAME=janus-lan-server-0000
+      - CONFIG_PATH=/app/config/config-ycsb.yml
+    volumes:
+      - ./config-ycsb.yml:/app/config/config-ycsb.yml
+    restart: always
+
+  server-1:
+    image: tiga-suite
+    container_name: server-1
+    network_mode: host
+    environment:
+      - PROTOCOL=${PROTOCOL:-tiga}
+      - SERVER_NAME=janus-lan-server-0100
+      - CONFIG_PATH=/app/config/config-ycsb.yml
+    volumes:
+      - ./config-ycsb.yml:/app/config/config-ycsb.yml
+    restart: always
+
+  server-2:
+    image: tiga-suite
+    container_name: server-2
+    network_mode: host
+    environment:
+      - PROTOCOL=${PROTOCOL:-tiga}
+      - SERVER_NAME=janus-lan-server-0200
+      - CONFIG_PATH=/app/config/config-ycsb.yml
+    volumes:
+      - ./config-ycsb.yml:/app/config/config-ycsb.yml
+    restart: always
