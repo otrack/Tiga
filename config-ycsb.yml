@@ -9,6 +9,9 @@ bench:
   dist: zipf
   coefficient: 0.9
 
+# Note: The schema block below is not used or parsed at runtime for the YCSB workload.
+# The YCSB engine (YCSBStateMachine) uses a dynamic row store, so the number of
+# fields is fully dynamic and determined at runtime by the YCSB driver config.
 schema:
   - name: usertable
     column:
