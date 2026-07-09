@@ -9,11 +9,18 @@ enum YCSB_TXN_TYPE {
    YCSB_INSERT
 };
 
+#include <unordered_map>
+
+struct SpeculativeString {
+   uint64_t txnId_ = UINT64_MAX;
+   std::string value_ = "";
+};
+
 class YCSBStateMachine : public StateMachine {
   private:
-   uint32_t kvStore_[YCSB_MAX_KEY_NUM];
+   std::vector<std::vector<std::string>> kvStore_;
    // Speculative execution support
-   VersionInfo speculativeVersion_[YCSB_MAX_KEY_NUM];
+   std::unordered_map<int32_t, SpeculativeString> speculativeVersion_;
 
   public:
    YCSBStateMachine(const uint32_t shardId, const uint32_t replicaId,

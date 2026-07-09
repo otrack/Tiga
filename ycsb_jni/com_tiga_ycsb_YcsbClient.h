@@ -26,10 +26,10 @@ JNIEXPORT void JNICALL Java_com_tiga_ycsb_YcsbClient_closeClient
 /*
  * Class:     com_tiga_ycsb_YcsbClient
  * Method:    read
- * Signature: (Ljava/lang/String;Ljava/util/Map;)I
+ * Signature: (Ljava/lang/String;Ljava/util/Set;Ljava/util/Map;)I
  */
 JNIEXPORT jint JNICALL Java_com_tiga_ycsb_YcsbClient_read
-  (JNIEnv *, jobject, jstring, jobject);
+  (JNIEnv *, jobject, jstring, jobject, jobject);
 
 /*
  * Class:     com_tiga_ycsb_YcsbClient

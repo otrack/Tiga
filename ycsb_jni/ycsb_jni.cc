@@ -58,7 +58,7 @@ JNIEXPORT void JNICALL Java_com_tiga_ycsb_YcsbClient_closeClient(JNIEnv *env, jo
     }
 }
 
-static jint runClientTxn(JNIEnv *env, jobject obj, jstring jkey, jobject jmap, uint32_t txnType) {
+static jint runClientTxn(JNIEnv *env, jobject obj, jstring jkey, jobject jfields, jobject jmap, uint32_t txnType) {
     jclass thisClass = env->GetObjectClass(obj);
     jfieldID fid = env->GetFieldID(thisClass, "clientHandle", "J");
     jlong handle = env->GetLongField(obj, fid);
@@ -66,17 +66,17 @@ static jint runClientTxn(JNIEnv *env, jobject obj, jstring jkey, jobject jmap, u
     if (!client) return -1;
 
     std::string key = jstring2string(env, jkey);
-    return client->execute(txnType, key, env, jmap);
+    return client->execute(txnType, key, env, jfields, jmap);
 }
 
-JNIEXPORT jint JNICALL Java_com_tiga_ycsb_YcsbClient_read(JNIEnv *env, jobject obj, jstring jkey, jobject jmap) {
-    return runClientTxn(env, obj, jkey, jmap, 1);
+JNIEXPORT jint JNICALL Java_com_tiga_ycsb_YcsbClient_read(JNIEnv *env, jobject obj, jstring jkey, jobject jfields, jobject jmap) {
+    return runClientTxn(env, obj, jkey, jfields, jmap, 1);
 }
 
 JNIEXPORT jint JNICALL Java_com_tiga_ycsb_YcsbClient_update(JNIEnv *env, jobject obj, jstring jkey, jobject jmap) {
-    return runClientTxn(env, obj, jkey, jmap, 2);
+    return runClientTxn(env, obj, jkey, nullptr, jmap, 2);
 }
 
 JNIEXPORT jint JNICALL Java_com_tiga_ycsb_YcsbClient_insert(JNIEnv *env, jobject obj, jstring jkey, jobject jmap) {
-    return runClientTxn(env, obj, jkey, jmap, 3);
+    return runClientTxn(env, obj, jkey, nullptr, jmap, 3);
 }

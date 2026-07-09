@@ -68,7 +68,7 @@ public:
         delete comm_;
     }
 
-    int execute(uint32_t txnType, const std::string& key, JNIEnv* env, jobject jmap) override {
+    int execute(uint32_t txnType, const std::string& key, JNIEnv* env, jobject jfields, jobject jmap) override {
         int32_t int_key = hashKey(key);
 
         ClientRequest req;

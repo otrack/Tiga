@@ -8,7 +8,7 @@
 class BaseYcsbClient {
 public:
     virtual ~BaseYcsbClient() {}
-    virtual int execute(uint32_t txnType, const std::string& key, JNIEnv* env, jobject jmap) = 0;
+    virtual int execute(uint32_t txnType, const std::string& key, JNIEnv* env, jobject jfields, jobject jmap) = 0;
 };
 
 BaseYcsbClient* createTigaClient(const std::string& configPath);
