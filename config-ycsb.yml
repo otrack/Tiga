@@ -5,31 +5,27 @@ bench:
     read: 0.5
     write: 0.5
   population:
-    branch: 10000
-    teller: 10000
-    customer: 10000
+    usertable: 2000005
   dist: zipf
   coefficient: 0.9
 
 schema:
-  - name: branch
+  - name: usertable
     column:
-      - { name: branch_id, type: integer, primary: true }
-      - { name: balance, type: integer }
-  - name: teller
-    column:
-      - { name: teller_id, type: integer, primary: true }
-      - { name: branch_id, type: integer, foreign: branch.branch_id }
-  - name: customer
-    column:
-      - { name: customer_id, type: integer, primary: true }
-      - { name: branch_id, type: integer, foreign: branch.branch_id }
-      - { name: balance, type: integer }
+      - { name: key, type: string, primary: true }
+      - { name: field0, type: string }
+      - { name: field1, type: string }
+      - { name: field2, type: string }
+      - { name: field3, type: string }
+      - { name: field4, type: string }
+      - { name: field5, type: string }
+      - { name: field6, type: string }
+      - { name: field7, type: string }
+      - { name: field8, type: string }
+      - { name: field9, type: string }
 
 sharding:
-  branch: MOD
-  teller: MOD
-  customer: MOD
+  usertable: MOD
 
 client: { rate: 500, type: open, forwarding: false }
 n_concurrent: 1
