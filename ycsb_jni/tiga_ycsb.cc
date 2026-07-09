@@ -97,6 +97,26 @@ int getFieldId(const std::string& fieldName) {
     }
     return 0;
 }
+std::string serializeMap(const std::map<std::string, std::string>& m) {
+    std::string ret = "";
+    for (auto const& [k, v] : m) {
+        ret += k + ":" + v + "|";
+    }
+    return ret;
+}
+
+void deserializeMap(const std::string& str, std::map<std::string, std::string>& m) {
+    size_t last = 0;
+    size_t next = 0;
+    while ((next = str.find('|', last)) != std::string::npos) {
+        std::string pair = str.substr(last, next - last);
+        size_t colon = pair.find(':');
+        if (colon != std::string::npos) {
+            m[pair.substr(0, colon)] = pair.substr(colon + 1);
+        }
+        last = next + 1;
+    }
+}
 
 class TigaYcsbClient : public BaseYcsbClient {
 public:
@@ -149,23 +169,14 @@ public:
         req.cmd_.txnType_ = txnType;
 
         if (txnType == 1) { // Read
-            std::vector<std::string> fields;
-            extractJavaSet(env, jfields, fields);
-            for (const auto& field : fields) {
-                int fieldId = getFieldId(field);
-                int32_t cell_key = int_key * 100 + fieldId;
-                req.cmd_.ws_[cell_key].set_i32(0);
-                req.targetShards_.insert(int_key % shardNum_);
-            }
+            req.cmd_.ws_[int_key].set_i32(0);
+            req.targetShards_.insert(int_key % shardNum_);
         } else if (txnType == 2 || txnType == 3) { // Update / Insert
             std::map<std::string, std::string> cppMap;
             extractJavaMap(env, jmap, cppMap);
-            for (auto const& [field, val] : cppMap) {
-                int fieldId = getFieldId(field);
-                int32_t cell_key = int_key * 100 + fieldId;
-                req.cmd_.ws_[cell_key].set_str(val);
-                req.targetShards_.insert(int_key % shardNum_);
-            }
+            std::string payload = serializeMap(cppMap);
+            req.cmd_.ws_[int_key].set_str(payload);
+            req.targetShards_.insert(int_key % shardNum_);
         }
 
         auto promise = std::make_shared<std::promise<ClientReply>>();
@@ -184,15 +195,21 @@ public:
         ClientReply reply = future.get();
 
         if (txnType == 1 && jmap) { // Read
+            std::string rowStr = "";
+            auto it = reply.result_.find(int_key);
+            if (it != reply.result_.end()) {
+                rowStr = it->second.get_str();
+            }
+            std::map<std::string, std::string> rowMap;
+            deserializeMap(rowStr, rowMap);
+
             std::vector<std::string> fields;
             extractJavaSet(env, jfields, fields);
             for (const auto& field : fields) {
-                int fieldId = getFieldId(field);
-                int32_t cell_key = int_key * 100 + fieldId;
                 std::string val = "";
-                auto it = reply.result_.find(cell_key);
-                if (it != reply.result_.end()) {
-                    val = it->second.get_str();
+                auto valIt = rowMap.find(field);
+                if (valIt != rowMap.end()) {
+                    val = valIt->second;
                 }
                 populateJavaMap(env, jmap, field, val);
             }
