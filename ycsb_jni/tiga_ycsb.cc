@@ -22,6 +22,8 @@ class TigaYcsbTxnGenerator : public TxnGenerator {
     void GetTxnReq(ClientRequest *req, uint32_t reqId, uint32_t cid) override {}
 };
 
+namespace {
+
 void extractJavaMap(JNIEnv* env, jobject jmap, std::map<std::string, std::string>& cppMap) {
     if (!jmap) return;
     jclass mapClass = env->GetObjectClass(jmap);
@@ -97,6 +99,7 @@ int getFieldId(const std::string& fieldName) {
     }
     return 0;
 }
+
 std::string serializeMap(const std::map<std::string, std::string>& m) {
     std::string ret = "";
     for (auto const& [k, v] : m) {
@@ -117,6 +120,8 @@ void deserializeMap(const std::string& str, std::map<std::string, std::string>& 
         last = next + 1;
     }
 }
+
+} // namespace
 
 class TigaYcsbClient : public BaseYcsbClient {
 public:

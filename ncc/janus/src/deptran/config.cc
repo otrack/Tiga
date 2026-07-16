@@ -457,6 +457,8 @@ void Config::InitBench(std::string &bench_str) {
       benchmark_ = SPANNER;
    } else if (bench_str == "dynamic") {
       benchmark_ = DYNAMIC;
+   } else if (bench_str == "ycsb") {
+      benchmark_ = YCSB;
    } else {
       Log_error("No implementation for benchmark: %s", bench_str.c_str());
       verify(0);

@@ -361,6 +361,8 @@ class TigaReplica {
 
    std::atomic<uint32_t> normalRequestNum_;
    std::atomic<uint32_t> reconcliationRequstNum_;
+   std::atomic<uint64_t> nFastCommits_;
+   std::atomic<uint64_t> nSlowCommits_;
 
    bool killed_;
 };

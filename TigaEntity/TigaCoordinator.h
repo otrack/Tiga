@@ -42,6 +42,8 @@ struct GlobalInfo {
    uint32_t replyNumPerNode_[MAX_SHARD_NUM][MAX_REPLICA_NUM];
    std::atomic<uint32_t> fastReplyNum1_;
    std::atomic<uint32_t> fastReplyNum2_;
+   std::atomic<uint64_t> nFastCommits_;
+   std::atomic<uint64_t> nSlowCommits_;
    uint64_t markTime_;
    uint32_t cap_;
    uint32_t initBound_;

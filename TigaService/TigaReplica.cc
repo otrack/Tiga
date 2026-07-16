@@ -105,6 +105,8 @@ TigaReplica::TigaReplica(const std::string& serverName,
    nextSpecLogId_ = 1;
    commitPoint_ = 0;
    executedLogId_ = 0;
+   nFastCommits_ = 0;
+   nSlowCommits_ = 0;
 
    syncedLogList_.reserve(1000ul * 1000ul * 100);
    lastBroadcastSyncedLogId_ = 0;
@@ -500,6 +502,7 @@ void TigaReplica::LeaderPreExecTd() {
             if (candidate->agreeStatus_ == AGREE_COMPLETE) {
                candidate->execStatus_ = EXEC_DIRECT;
                toExecQuF_.enqueue({candidate, EXEC_DIRECT});
+               nSlowCommits_++;
                for (auto& k : candidate->localKeys_) {
                   entriesInSpec_[k] = NULL;
                   candidateKeys.push_back(k);
@@ -519,6 +522,7 @@ void TigaReplica::LeaderPreExecTd() {
                   // The previous spec is correct --> commit
                   candidate->execStatus_ = EXEC_COMMITING;
                   toExecQuF_.enqueue({candidate, EXEC_COMMITING});
+                  nFastCommits_++;
                   for (auto& k : candidate->localKeys_) {
                      entriesInSpec_[k] = NULL;
                      candidateKeys.push_back(k);
@@ -548,6 +552,7 @@ void TigaReplica::LeaderPreExecTd() {
             if (candidate->agreeStatus_ == AGREE_COMPLETE) {
                candidate->execStatus_ = EXEC_DIRECT;
                toExecQuF_.enqueue({candidate, EXEC_DIRECT});
+               nSlowCommits_++;
                for (auto& k : candidate->localKeys_) {
                   entriesInSpec_[k] = NULL;
                   candidateKeys.push_back(k);
@@ -567,6 +572,12 @@ void TigaReplica::LeaderPreExecTd() {
       candidateEntries = std::move(newCandidateEntries);
       newCandidateEntries.clear();
       candidateKeys.clear();
+
+      if (GetMicrosecondTimestamp() - debugTime >= 1000 * 1000) {
+         LOG(INFO) << "weird 0; conflicted 0; slow " << nSlowCommits_.load() 
+                   << "; fast " << nFastCommits_.load();
+         debugTime = GetMicrosecondTimestamp();
+      }
    }
    activeThreads_.fetch_sub(1);
 }

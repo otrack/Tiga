@@ -6,6 +6,7 @@
 #include <inttypes.h>
 
 #include <sys/time.h>
+#include <time.h>
 
 #include "debugging.hpp"
 

@@ -160,6 +160,7 @@ namespace janus {
 #define FACEBOOK (6)
 #define SPANNER (7)
 #define DYNAMIC (8)
+#define YCSB (9)
 
 
 } // namespace janus

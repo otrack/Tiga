@@ -43,6 +43,9 @@
 #include "bench/rw/procedure.h"
 #include "bench/rw/sharding.h"
 
+// ycsb benchmark
+#include "bench/ycsb/ycsb.h"
+
 // micro bench
 #include "bench/micro/workload.h"
 #include "bench/micro/procedure.h"
@@ -276,6 +279,11 @@ void Frame::GetTxTypes(std::map<int32_t, std::string>& txn_types) {
       txn_types[DYNAMIC_ROTXN] = std::string(DYNAMIC_ROTXN_NAME);
       txn_types[DYNAMIC_RW] = std::string(DYNAMIC_RW_NAME);
       break;
+    case YCSB:
+      txn_types[1] = "read";
+      txn_types[2] = "update";
+      txn_types[3] = "insert";
+      break;
     default:
       Log_fatal("benchmark not implemented");
       verify(0);
@@ -316,6 +324,9 @@ TxData* Frame::CreateTxnCommand(TxRequest& req, shared_ptr<TxnRegistry> reg) {
     case DYNAMIC:
       verify(req.tx_type_ == DYNAMIC_ROTXN || req.tx_type_ == DYNAMIC_RW);
       cmd = new DynamicChopper();
+      break;
+    case YCSB:
+      cmd = new YcsbChopper();
       break;
     default:
       verify(0);

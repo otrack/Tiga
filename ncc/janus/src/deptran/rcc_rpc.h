@@ -163,10 +163,10 @@ inline rrr::Marshal& operator >>(rrr::Marshal& m, TxnDispatchResponse& o) {
 class MultiPaxosService: public rrr::Service {
 public:
     enum {
-        FORWARD = 0x33586f09,
-        PREPARE = 0x2fe7386b,
-        ACCEPT = 0x451f1afe,
-        DECIDE = 0x678fa9d9,
+        FORWARD = 0x5bfbe0dd,
+        PREPARE = 0x20360ae8,
+        ACCEPT = 0x2466b315,
+        DECIDE = 0x3cf4f0f5,
     };
     int __reg_to__(rrr::Server* svr) {
         int ret = 0;
@@ -353,44 +353,44 @@ public:
 class ClassicService: public rrr::Service {
 public:
     enum {
-        MSGSTRING = 0x2ff0de6c,
-        MSGMARSHALL = 0x48ff3951,
-        DISPATCH = 0x31a46cbb,
-        PREPARE = 0x3ff9af5c,
-        COMMIT = 0x23f48b32,
-        ABORT = 0x2a061746,
-        UPGRADEEPOCH = 0x1761a376,
-        TRUNCATEEPOCH = 0x1e16ec03,
-        RPC_NULL = 0x3d75326c,
-        TAPIRACCEPT = 0x6cd6646a,
-        TAPIRFASTACCEPT = 0x373b0c11,
-        TAPIRDECIDE = 0x280428a6,
-        RCCDISPATCH = 0x54c8fa62,
-        RCCFINISH = 0x5588bbe2,
-        RCCINQUIRE = 0x33d9b435,
-        RCCDISPATCHRO = 0x1fd2dd13,
-        RCCINQUIREVALIDATION = 0x10e4cb5d,
-        RCCNOTIFYGLOBALVALIDATION = 0x4b1d8966,
-        JANUSDISPATCH = 0x5db6a23d,
-        RCCCOMMIT = 0x361584bf,
-        JANUSCOMMIT = 0x3db5db7d,
-        JANUSCOMMITWOGRAPH = 0x61854dd7,
-        JANUSINQUIRE = 0x35015411,
-        RCCPREACCEPT = 0x58456ae0,
-        JANUSPREACCEPT = 0x4655941d,
-        JANUSPREACCEPTWOGRAPH = 0x52204b15,
-        RCCACCEPT = 0x27c966c7,
-        JANUSACCEPT = 0x40c2dab8,
-        PREACCEPTFEBRUUS = 0x3cdd9493,
-        ACCEPTFEBRUUS = 0x2627ed9b,
-        COMMITFEBRUUS = 0x240c2617,
-        ACCDISPATCH = 0x18dbb5db,
-        ACCROTXNDISPATCH = 0x3ad2902a,
-        ACCVALIDATE = 0x65707775,
-        ACCFINALIZE = 0x19742c66,
-        ACCSTATUSQUERY = 0x419b3ed0,
-        ACCRESOLVESTATUSCOORD = 0x1d41f268,
-        ACCGETRECORD = 0x5fc5ea62,
+        MSGSTRING = 0x5b8641f7,
+        MSGMARSHALL = 0x4c297f19,
+        DISPATCH = 0x52213788,
+        PREPARE = 0x2217c901,
+        COMMIT = 0x49ec212a,
+        ABORT = 0x227ccdce,
+        UPGRADEEPOCH = 0x68984bb2,
+        TRUNCATEEPOCH = 0x244466ad,
+        RPC_NULL = 0x30a2ba95,
+        TAPIRACCEPT = 0x1628a934,
+        TAPIRFASTACCEPT = 0x2c31b64f,
+        TAPIRDECIDE = 0x2dfb4bce,
+        RCCDISPATCH = 0x2291d74b,
+        RCCFINISH = 0x62252fa9,
+        RCCINQUIRE = 0x5a990076,
+        RCCDISPATCHRO = 0x1db8cf02,
+        RCCINQUIREVALIDATION = 0x2df812c0,
+        RCCNOTIFYGLOBALVALIDATION = 0x385ada89,
+        JANUSDISPATCH = 0x2f993223,
+        RCCCOMMIT = 0x2273e30c,
+        JANUSCOMMIT = 0x12a5d5b5,
+        JANUSCOMMITWOGRAPH = 0x49072a13,
+        JANUSINQUIRE = 0x1570e22d,
+        RCCPREACCEPT = 0x40134af5,
+        JANUSPREACCEPT = 0x2d75082e,
+        JANUSPREACCEPTWOGRAPH = 0x5bbe8e23,
+        RCCACCEPT = 0x5dd1620e,
+        JANUSACCEPT = 0x31188074,
+        PREACCEPTFEBRUUS = 0x23d7225a,
+        ACCEPTFEBRUUS = 0x452c149d,
+        COMMITFEBRUUS = 0x566ea889,
+        ACCDISPATCH = 0x614e9361,
+        ACCROTXNDISPATCH = 0x69e6e3aa,
+        ACCVALIDATE = 0x5370bc51,
+        ACCFINALIZE = 0x32453440,
+        ACCSTATUSQUERY = 0x2c816e87,
+        ACCRESOLVESTATUSCOORD = 0x65a3dfef,
+        ACCGETRECORD = 0x197394a0,
     };
     int __reg_to__(rrr::Server* svr) {
         int ret = 0;
@@ -2153,10 +2153,10 @@ public:
 class ServerControlService: public rrr::Service {
 public:
     enum {
-        SERVER_SHUTDOWN = 0x33b51172,
-        SERVER_READY = 0x6d77ec06,
-        SERVER_HEART_BEAT_WITH_DATA = 0x3a7607dc,
-        SERVER_HEART_BEAT = 0x53517a65,
+        SERVER_SHUTDOWN = 0x649bba21,
+        SERVER_READY = 0x64a8e4fa,
+        SERVER_HEART_BEAT_WITH_DATA = 0x3b3fca4d,
+        SERVER_HEART_BEAT = 0x38ea6e29,
     };
     int __reg_to__(rrr::Server* svr) {
         int ret = 0;
@@ -2299,14 +2299,14 @@ public:
 class ClientControlService: public rrr::Service {
 public:
     enum {
-        CLIENT_GET_TXN_NAMES = 0x4e903c07,
-        CLIENT_SHUTDOWN = 0x6f65941c,
-        CLIENT_FORCE_STOP = 0x6ff03ab9,
-        CLIENT_RESPONSE = 0x49b1b514,
-        CLIENT_READY = 0x3a15dd62,
-        CLIENT_READY_BLOCK = 0x54e94bd8,
-        CLIENT_START = 0x5c8841d8,
-        DISPATCHTXN = 0x5788dff4,
+        CLIENT_GET_TXN_NAMES = 0x44b76169,
+        CLIENT_SHUTDOWN = 0x64f11e7b,
+        CLIENT_FORCE_STOP = 0x1ead6742,
+        CLIENT_RESPONSE = 0x467197bb,
+        CLIENT_READY = 0x319f9b89,
+        CLIENT_READY_BLOCK = 0x36c2ab0b,
+        CLIENT_START = 0x6a7bf218,
+        DISPATCHTXN = 0x1caaf5b7,
     };
     int __reg_to__(rrr::Server* svr) {
         int ret = 0;

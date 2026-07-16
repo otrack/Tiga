@@ -1,7 +1,6 @@
 #pragma once
 
-#include "rpc/server.h"
-#include "rpc/client.h"
+#include "rrr.hpp"
 
 #include <errno.h>
 
@@ -11,8 +10,8 @@ namespace rlog {
 class RLogService: public rrr::Service {
 public:
     enum {
-        LOG = 0x4585f576,
-        AGGREGATE_QPS = 0x206797fa,
+        LOG = 0x51201f94,
+        AGGREGATE_QPS = 0x5cff3750,
     };
     int __reg_to__(rrr::Server* svr) {
         int ret = 0;

@@ -38,6 +38,11 @@ JNIEXPORT jlong JNICALL Java_com_tiga_ycsb_YcsbClient_initClient(JNIEnv *env, jo
 
     try {
         BaseYcsbClient* client = nullptr;
+        #ifdef BUILD_JANUS_JNI
+        if (mode == "janus") {
+            client = createJanusClient(configPath);
+        }
+        #else
         if (mode == "tiga") {
             client = createTigaClient(configPath);
         } else if (mode == "calvin") {
@@ -45,6 +50,7 @@ JNIEXPORT jlong JNICALL Java_com_tiga_ycsb_YcsbClient_initClient(JNIEnv *env, jo
         } else if (mode == "detock") {
             client = createDetockClient(configPath);
         }
+        #endif
         return reinterpret_cast<jlong>(client);
     } catch (const std::exception& e) {
         return 0;

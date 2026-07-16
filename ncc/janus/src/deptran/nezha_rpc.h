@@ -10,7 +10,7 @@ namespace PaxosRPC {
 class PaxosService: public rrr::Service {
 public:
     enum {
-        RECORDREQUEST = 0x60a6d5df,
+        RECORDREQUEST = 0x4c746e48,
     };
     int __reg_to__(rrr::Server* svr) {
         int ret = 0;

@@ -14,6 +14,7 @@ public:
 BaseYcsbClient* createTigaClient(const std::string& configPath);
 BaseYcsbClient* createCalvinClient(const std::string& configPath);
 BaseYcsbClient* createDetockClient(const std::string& configPath);
+BaseYcsbClient* createJanusClient(const std::string& configPath);
 
 int32_t hashKey(const std::string& key);
 void populateJavaMap(JNIEnv* env, jobject jmap, const std::string& field, const std::string& value);

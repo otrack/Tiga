@@ -1,0 +1,10 @@
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${prefix}/lib/x86_64-linux-gnu
+includedir=${prefix}/include
+
+Name: boost
+Description: Boost C++ Libraries
+Version: 1.83.0
+Cflags: -I${includedir}
+Libs: -L${libdir} -lboost_system -lboost_filesystem -lboost_thread -lboost_coroutine -lboost_context
