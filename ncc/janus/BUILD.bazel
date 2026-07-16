@@ -1,0 +1,103 @@
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_binary")
+
+cc_library(
+    name = "janus_externc",
+    srcs = ["extern_interface/scheduler.c"],
+    hdrs = ["extern_interface/scheduler.h"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "janus_rrr",
+    srcs = glob([
+        "src/rrr/base/*.cpp",
+        "src/rrr/misc/*.cpp",
+        "src/rrr/rpc/*.cpp",
+        "src/rrr/reactor/*.cc",
+    ], allow_empty = True),
+    hdrs = glob([
+        "src/rrr/base/*.hpp",
+        "src/rrr/misc/*.hpp",
+        "src/rrr/rpc/*.hpp",
+        "src/rrr/reactor/*.h",
+        "src/rrr/rlog/*.h",
+        "src/rrr/rrr.h",
+        "src/rrr/rrr.hpp",
+    ], allow_empty = True),
+    includes = ["src", "src/rrr"],
+    linkopts = [
+        "-pthread",
+        "-lboost_filesystem",
+        "-lboost_coroutine",
+        "-lboost_context",
+        "-lboost_thread",
+        "-lboost_system",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "janus_memdb",
+    srcs = glob(["src/memdb/*.cc"], allow_empty = True),
+    hdrs = glob(["src/memdb/*.h"], allow_empty = True),
+    includes = ["src", "src/rrr", "src/deptran"],
+    deps = [
+        ":janus_rrr",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "janus_lib",
+    srcs = glob(
+        [
+            "src/deptran/*.cc",
+            "src/deptran/*/*.cc",
+            "src/bench/*/*.cc",
+        ],
+        exclude = [
+            "src/deptran/s_main.cc",
+            "src/deptran/nezha_bridge_server.cc",
+            "src/deptran/paxos_main_helper.cc",
+        ],
+        allow_empty = True,
+    ),
+    hdrs = glob([
+        "src/deptran/*.h",
+        "src/deptran/*/*.h",
+        "src/bench/*/*.h",
+        "src/deptran/*.hpp",
+        "src/deptran/*/*.hpp",
+        "src/bench/*/*.hpp",
+    ], allow_empty = True),
+    includes = ["src", "src/deptran", "src/rrr"],
+    copts = [
+        "-Wno-reorder",
+        "-Wno-comment",
+        "-Wno-unused-function",
+        "-Wno-unused-variable",
+        "-Wno-sign-compare",
+    ],
+    deps = [
+        ":janus_rrr",
+        ":janus_memdb",
+        ":janus_externc",
+    ],
+    linkopts = [
+        "-lrt",
+        "-pthread",
+        "-lgflags",
+        "-lglog",
+        "-lyaml-cpp",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_binary(
+    name = "deptran_server",
+    srcs = ["src/deptran/s_main.cc"],
+    deps = [
+        ":janus_lib",
+    ],
+    visibility = ["//visibility:public"],
+)
