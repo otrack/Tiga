@@ -182,12 +182,11 @@ std::pair<int, ClassicProxy*> Communicator::ConnectToSite(
 
 std::pair<siteid_t, ClassicProxy*> Communicator::NearestProxyForPartition(
     parid_t par_id) const {
-   // TODO Fix me.
    auto it = rpc_par_proxies_.find(par_id);
    verify(it != rpc_par_proxies_.end());
    auto& partition_proxies = it->second;
-   verify(partition_proxies.size() > loc_id_);
-   int index = loc_id_;
+   verify(!partition_proxies.empty());
+   uint32_t index = (uint32_t)loc_id_ % partition_proxies.size();
    return partition_proxies[index];
 };
 

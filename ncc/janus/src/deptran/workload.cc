@@ -38,6 +38,9 @@
 #include "bench/dynamic/workload.h"
 #include "bench/dynamic/procedure.h"
 
+// YCSB
+#include "bench/ycsb/ycsb.h"
+
 namespace janus {
 
 Workload* Workload::CreateWorkload(Config *config) {
@@ -63,6 +66,8 @@ Workload* Workload::CreateWorkload(Config *config) {
     return new SpannerWorkload(config);
   case DYNAMIC:
     return new DynamicWorkload(config);
+  case YCSB:
+    return new YcsbWorkload(config);
   default:
     verify(0);
     return NULL;
@@ -112,6 +117,8 @@ Workload::Workload(Config* config)
     case DYNAMIC:
       dynamic_para_.n_rows_ = table_num_rows[std::string(DYNAMIC_TABLE)];
       break;
+    case YCSB:
+      break;
     default:
       Log_fatal("benchmark not implemented");
       verify(0);
@@ -152,6 +159,11 @@ void Workload::GetProcedureTypes(map<int32_t, string> &txn_types) {
     case DYNAMIC:
       txn_types[DYNAMIC_ROTXN] = std::string(DYNAMIC_ROTXN_NAME);
       txn_types[DYNAMIC_RW] = std::string(DYNAMIC_RW_NAME);
+      break;
+    case YCSB:
+      txn_types[1] = "read";
+      txn_types[2] = "update";
+      txn_types[3] = "insert";
       break;
     default:
       Log_fatal("benchmark not implemented");

@@ -34,8 +34,9 @@ public:
         i64_ = o.i64_;
         double_ = o.double_;
         if (k_ == STR) {
-            p_str_ = new std::string(std::move(*o.p_str_));
+            p_str_ = o.p_str_;
             o.p_str_ = nullptr;
+            o.k_ = UNKNOWN;
         }
     }
 
@@ -45,36 +46,39 @@ public:
         i64_ = o.i64_;
         double_ = o.double_;
         if (k_ == STR) {
-            p_str_ = new std::string(*o.p_str_);
+            p_str_ = (o.p_str_ != nullptr) ? new std::string(*o.p_str_) : new std::string("");
         }
     }
 
     ~Value() {
-        if (k_ == STR) {
+        if (k_ == STR && p_str_ != nullptr) {
             delete p_str_;
+            p_str_ = nullptr;
         }
     }
 
     // let's add a move assign operator for ACCESS
     Value& operator=(Value&& that) noexcept {
-        verify(this != &that);
-        if (k_ == STR) {
-            delete p_str_;
-        }
-        k_ = that.k_;
-        i32_ = that.i32_;
-        i64_ = that.i64_;
-        double_ = that.double_;
-        if (k_ == STR) {
-            p_str_ = new std::string(std::move(*that.p_str_));
-            that.p_str_ = nullptr;
+        if (this != &that) {
+            if (k_ == STR && p_str_ != nullptr) {
+                delete p_str_;
+            }
+            k_ = that.k_;
+            i32_ = that.i32_;
+            i64_ = that.i64_;
+            double_ = that.double_;
+            if (k_ == STR) {
+                p_str_ = that.p_str_;
+                that.p_str_ = nullptr;
+                that.k_ = UNKNOWN;
+            }
         }
         return *this;
     }
 
     const Value& operator= (const Value& o) {
         if (this != &o) {
-            if (k_ == STR) {
+            if (k_ == STR && p_str_ != nullptr) {
                 delete p_str_;
             }
             k_ = o.k_;
@@ -82,7 +86,7 @@ public:
             i64_ = o.i64_;
             double_ = o.double_;
             if (k_ == STR) {
-                p_str_ = new std::string(*o.p_str_);
+                p_str_ = (o.p_str_ != nullptr) ? new std::string(*o.p_str_) : new std::string("");
             }
         }
         return *this;
@@ -190,7 +194,10 @@ public:
     }
 
     void set_str(const std::string& str) {
-        if (k_ == UNKNOWN) {
+        if (k_ == UNKNOWN || p_str_ == nullptr) {
+            if (k_ == STR && p_str_ != nullptr) {
+                delete p_str_;
+            }
             k_ = STR;
             p_str_ = new std::string(str);
         } else {

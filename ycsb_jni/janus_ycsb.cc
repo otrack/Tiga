@@ -5,7 +5,7 @@
 #include "ncc/janus/src/deptran/procedure.h"
 #include "ncc/janus/src/deptran/config.h"
 #include "ncc/janus/src/deptran/sharding.h"
-#include "ncc/janus/src/deptran/constants.h"
+#include "ncc/janus/src/deptran/client_worker.h"
 #include <future>
 #include <mutex>
 #include <memory>
@@ -18,6 +18,8 @@
 #include <vector>
 #include <string>
 #include <cstring>
+
+std::vector<std::unique_ptr<janus::ClientWorker>> client_workers_g;
 
 namespace janus {
 
@@ -44,6 +46,8 @@ public:
         
         std::string table_name = "usertable";
         sss_->GetPartition(table_name, req.input_[0], sharding_[piece_type]);
+        partition_ids_.insert(sharding_[piece_type]);
+        std::cerr << "[DEBUG JNI] YcsbChopper Init piece_type=" << piece_type << " target_partition=" << sharding_[piece_type] << std::endl;
         
         status_ = {{piece_type, DISPATCHABLE}};
         n_pieces_all_ = 1;
@@ -59,11 +63,15 @@ public:
 
     virtual void Reset() override {
         TxData::Reset();
+        ws_ = ws_init_;
+        innid_t piece_type = type_ * 10;
+        GetWorkspace(piece_type);
         for (auto& pair : status_) {
             pair.second = DISPATCHABLE;
         }
         commit_.store(true);
         partition_ids_.clear();
+        partition_ids_.insert(sharding_[piece_type]);
         n_pieces_dispatchable_ = 1;
         n_try_++;
     }
@@ -168,10 +176,11 @@ public:
                      last = next + 1;
                  }
 
-                 std::vector<Value> row_data(11);
+        std::vector<Value> row_data(11);
                  row_data[0] = cmd.input[0]; 
                  for (int col = 1; col <= 10; ++col) {
-                     row_data[col] = Value(fieldVals[col]);
+                     auto it = fieldVals.find(col);
+                     row_data[col] = Value(it != fieldVals.end() ? it->second : "");
                  }
 
                  mdb::Row* r = nullptr;
@@ -200,7 +209,7 @@ void extractJavaMap(JNIEnv* env, jobject jmap, std::map<std::string, std::string
     jclass iteratorClass = env->GetObjectClass(iterator);
     jmethodID hasNextMethod = env->GetMethodID(iteratorClass, "hasNext", "()Z");
     jmethodID nextMethod = env->GetMethodID(iteratorClass, "next", "()Ljava/lang/Object;");
-    
+
     jclass entryClass = nullptr;
     jmethodID getKeyMethod = nullptr;
     jmethodID getValueMethod = nullptr;
@@ -275,21 +284,24 @@ public:
     uint32_t replicaNum_;
 
     static std::atomic<uint32_t> nextCoordinatorId_;
+    static std::once_flag config_once_;
 
     JanusYcsbClient(const std::string& configPath) {
-        std::vector<std::string> args = {
-            "ycsb",
-            "-f", configPath,
-            "-P", "janus-lan-proxy-0000"
-        };
-        std::vector<char*> argv;
-        for (const auto& arg : args) {
-            argv.push_back(const_cast<char*>(arg.c_str()));
-        }
-        int argc = argv.size();
+        std::call_once(config_once_, [&configPath]() {
+            std::vector<std::string> args = {
+                "ycsb",
+                "-f", configPath,
+                "-P", "janus-lan-proxy-0000"
+            };
+            std::vector<char*> argv;
+            for (const auto& arg : args) {
+                argv.push_back(const_cast<char*>(arg.c_str()));
+            }
+            int argc = argv.size();
 
-        int ret = janus::Config::CreateConfig(argc, argv.data());
-        verify(ret == SUCCESS);
+            int ret = janus::Config::CreateConfig(argc, argv.data());
+            verify(ret == SUCCESS);
+        });
 
         config_ = janus::Config::GetConfig();
         shardNum_ = config_->GetNumPartition();
@@ -318,6 +330,7 @@ public:
         verify(!client_infos.empty());
         auto& my_site = client_infos[0];
 
+        commo_->loc_id_ = my_site.locale_id;
         coord_ = frame_->CreateCoordinator(coo_id, config_, config_->benchmark_, nullptr, client_id, txn_reg_);
         coord_->loc_id_ = my_site.locale_id;
         coord_->commo_ = commo_;
@@ -331,18 +344,18 @@ public:
     }
 
     int execute(uint32_t txnType, const std::string& key, JNIEnv* env, jobject jfields, jobject jmap) override {
-        int32_t int_key = hashKey(key);
-
+        std::cerr << "[DEBUG JNI] execute called type=" << txnType << " key=" << key << std::endl;
         janus::TxRequest req;
         req.tx_type_ = txnType;
         req.n_try_ = 20;
 
-        req.input_[0] = janus::Value((i32)int_key);
+        req.input_[0] = janus::Value(key);
 
         if (txnType == 2 || txnType == 3) { // Update or Insert
             std::map<std::string, std::string> cppMap;
             extractJavaMap(env, jmap, cppMap);
             std::string payload = serializeMap(cppMap);
+            std::cerr << "[DEBUG JNI] payload length=" << payload.length() << std::endl;
             req.input_[1] = janus::Value(payload);
         }
 
@@ -350,16 +363,16 @@ public:
         auto future = promise->get_future();
 
         req.callback_ = [promise](janus::TxReply& rep) {
+            std::cerr << "[DEBUG JNI] callback triggered res=" << rep.res_ << std::endl;
             promise->set_value(rep);
         };
 
+        std::cerr << "[DEBUG JNI] calling DoTxAsync..." << std::endl;
         coord_->DoTxAsync(req);
 
-        auto status = future.wait_for(std::chrono::seconds(5));
-        if (status == std::future_status::timeout) {
-            return -1; 
-        }
+        std::cerr << "[DEBUG JNI] waiting for future..." << std::endl;
         janus::TxReply reply = future.get();
+        std::cerr << "[DEBUG JNI] transaction done res=" << reply.res_ << std::endl;
 
         if (reply.res_ != SUCCESS) {
             return -1;
@@ -367,10 +380,9 @@ public:
 
         if (txnType == 1 && jmap) { // Read
             for (const auto& [col, val] : reply.output_) {
-                // Column ids are 1 to 10 for fields
                 int col_num = col - 1;
                 std::string field_name = "field" + std::to_string(col_num);
-                std::string field_val = val.get_str();
+                std::string field_val = (val.get_kind() == janus::Value::STR) ? val.get_str() : "";
                 populateJavaMap(env, jmap, field_name, field_val);
             }
         }
@@ -380,6 +392,7 @@ public:
 };
 
 std::atomic<uint32_t> JanusYcsbClient::nextCoordinatorId_{0};
+std::once_flag JanusYcsbClient::config_once_;
 
 BaseYcsbClient* createJanusClient(const std::string& configPath) {
     return new JanusYcsbClient(configPath);

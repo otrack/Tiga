@@ -194,6 +194,13 @@ int main(int argc, char* argv[]) {
    for (auto& worker : svr_workers_g) {
       worker.WaitForShutdown();
    }
+
+   if (client_infos.empty() && !server_infos.empty()) {
+      Log_info("Server node running, waiting for client requests...");
+      while (true) {
+         sleep(3600);
+      }
+   }
 #ifdef DB_CHECKSUM
    map<parid_t, vector<int>> checksum_results = {};
    for (auto& worker : svr_workers_g) {

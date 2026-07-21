@@ -27,6 +27,7 @@ void YcsbChopper::Init(TxRequest &req) {
     
     std::string table_name = "usertable";
     sss_->GetPartition(table_name, req.input_[0], sharding_[piece_type]);
+    partition_ids_.insert(sharding_[piece_type]);
     
     status_ = {{piece_type, DISPATCHABLE}};
     n_pieces_all_ = 1;
@@ -42,11 +43,15 @@ bool YcsbChopper::IsReadOnly() {
 
 void YcsbChopper::Reset() {
     TxData::Reset();
+    ws_ = ws_init_;
+    innid_t piece_type = type_ * 10;
+    GetWorkspace(piece_type);
     for (auto& pair : status_) {
         pair.second = DISPATCHABLE;
     }
     commit_.store(true);
     partition_ids_.clear();
+    partition_ids_.insert(sharding_[piece_type]);
     n_pieces_dispatchable_ = 1;
     n_try_++;
 }
@@ -152,7 +157,8 @@ void YcsbWorkload::RegisterPrecedures() {
              std::vector<Value> row_data(11);
              row_data[0] = cmd.input[0]; 
              for (int col = 1; col <= 10; ++col) {
-                 row_data[col] = Value(fieldVals[col]);
+                 auto it = fieldVals.find(col);
+                 row_data[col] = Value(it != fieldVals.end() ? it->second : "");
              }
 
              mdb::Row* r = nullptr;

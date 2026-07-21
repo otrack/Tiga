@@ -193,10 +193,6 @@ public:
 
         coord_->DoOne(req, txnGen_);
 
-        auto status = future.wait_for(std::chrono::seconds(5));
-        if (status == std::future_status::timeout) {
-            return -1; // Transaction timed out
-        }
         ClientReply reply = future.get();
 
         if (txnType == 1 && jmap) { // Read

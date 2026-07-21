@@ -15,6 +15,7 @@
 #include "2pl/coordinator.h"
 #include "occ/tx.h"
 #include "occ/coordinator.h"
+#include "troad/troad.h"
 
 #include "bench/tpcc_real_dist/sharding.h"
 #include "bench/tpcc/workload.h"
@@ -94,6 +95,9 @@ Frame* Frame::GetFrame(int mode) {
     case MODE_EXTERNC:
       frame = new ExternCFrame();
       break;
+    case MODE_JANUS:
+      frame = new TroadJanusFrame();
+      break;
     default:
       auto& mode_to_frame = Frame::ModeToFrame();
       auto it = mode_to_frame.find(mode);
@@ -104,9 +108,13 @@ Frame* Frame::GetFrame(int mode) {
   return frame;
 }
 
+
 int Frame::Name2Mode(string name) {
   auto &m = Frame::FrameNameToMode();
   auto it = m.find(name);
+  if (it == m.end()) {
+     Log_fatal("Unknown frame/protocol mode name: %s", name.c_str());
+  }
   verify(it != m.end());
   return it->second;
 }
@@ -150,6 +158,9 @@ Sharding* Frame::CreateSharding() {
       break;
     case DYNAMIC:
       ret = new DynamicSharding();
+      break;
+    case YCSB:
+      ret = new Sharding();
       break;
     default:
       verify(0);
@@ -451,6 +462,9 @@ Workload * Frame::CreateTxGenerator() {
     case DYNAMIC:
       gen = new DynamicWorkload(Config::GetConfig());
       break;
+    case YCSB:
+      gen = new YcsbWorkload(Config::GetConfig());
+      break;
     case MICRO_BENCH:
     default:
       verify(0);
@@ -498,7 +512,10 @@ map<string, int> &Frame::FrameNameToMode() {
       {"multi_paxos",   MODE_MULTI_PAXOS},
       {"epaxos",        MODE_NOT_READY},
       {"rep_commit",    MODE_NOT_READY},
-      {"acc",           MODE_ACC}
+      {"acc",           MODE_ACC},
+      {"brq",           MODE_JANUS},
+      {"janus",         MODE_JANUS},
+      {"baroque",       MODE_JANUS}
   };
   return frame_name_mode_s;
 }

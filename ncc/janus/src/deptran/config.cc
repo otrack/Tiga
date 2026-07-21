@@ -294,27 +294,23 @@ void Config::LoadYML(std::string &filename) {
 }
 
 void Config::LoadSiteYML(YAML::Node config) {
+   Log_info("%s", __FUNCTION__);
    auto servers = config["server"];
    int partition_id = 0;
    int site_id = 0;  // start from
    int locale_id = 0;
 
-   // count the sites so that we can reserve storage up front
-   // to avoid invalidating the pointers
    int num_sites = 0;
-   for (auto partition = servers.begin(); partition != servers.end();
-        partition++) {
-      num_sites += partition->size();
+   for (auto partition : servers) {
+      num_sites += partition.size();
    }
    sites_.reserve(num_sites);
 
-   for (auto server_it = servers.begin(); server_it != servers.end();
-        server_it++) {
-      auto group = *server_it;
+   for (auto group : servers) {
       locale_id = 0;
       ReplicaGroup replica_group(partition_id);
-      for (auto group_it = group.begin(); group_it != group.end(); group_it++) {
-         auto site_addr = group_it->as<string>();
+      for (auto site_node : group) {
+         auto site_addr = site_node.IsScalar() ? site_node.Scalar() : "";
          SiteInfo info(site_id++, site_addr);
          info.partition_id_ = replica_group.partition_id;
          info.locale_id = locale_id;
@@ -329,12 +325,10 @@ void Config::LoadSiteYML(YAML::Node config) {
    }
 
    auto clients = config["client"];
-   for (auto client_it = clients.begin(); client_it != clients.end();
-        client_it++) {
-      auto group = *client_it;
+   for (auto group : clients) {
       int locale_id = 0;
-      for (auto group_it = group.begin(); group_it != group.end(); group_it++) {
-         auto site_name = group_it->as<string>();
+      for (auto site_node : group) {
+         auto site_name = site_node.IsScalar() ? site_node.Scalar() : "";
          SiteInfo info(site_id++);
          info.name = site_name;
          info.proc_name = site_proc_map_[info.name];
@@ -374,30 +368,40 @@ int Config::GetClientPort(std::string site_name) {
 
 void Config::BuildSiteProcMap(YAML::Node process) {
    Log_info("%s", __FUNCTION__);
-   for (auto it = process.begin(); it != process.end(); it++) {
-      auto site_name = it->first.as<string>();
-      auto proc_name = it->second.as<string>();
-
-      site_proc_map_[site_name] = proc_name;
+   if (!process.IsMap()) {
+      Log_info("process node is not a map!");
+      return;
+   }
+   for (auto it = process.begin(); it != process.end(); ++it) {
+      std::string site_name = it->first.IsScalar() ? it->first.Scalar() : "";
+      std::string proc_name = it->second.IsScalar() ? it->second.Scalar() : "";
+      Log_info("  site_proc: '%s' -> '%s'", site_name.c_str(), proc_name.c_str());
+      if (!site_name.empty()) {
+         site_proc_map_[site_name] = proc_name;
+      }
    }
 }
 
 void Config::LoadProcYML(YAML::Node config) {
-   for (auto it = config.begin(); it != config.end(); it++) {
-      auto site_name = it->first.as<string>();
-      auto proc_name = it->second.as<string>();
+   Log_info("%s", __FUNCTION__);
+   if (!config.IsMap()) return;
+   for (auto it = config.begin(); it != config.end(); ++it) {
+      std::string site_name = it->first.IsScalar() ? it->first.Scalar() : "";
+      std::string proc_name = it->second.IsScalar() ? it->second.Scalar() : "";
       auto info = SiteByName(site_name);
-      //    verify(info != nullptr);
-      if (info != nullptr && proc_name != "") {
+      if (info != nullptr && !proc_name.empty()) {
          info->proc_name = proc_name;
       }
    }
 }
 
 void Config::LoadHostYML(YAML::Node config) {
-   for (auto it = config.begin(); it != config.end(); it++) {
-      auto proc_name = it->first.as<string>();
-      auto host_name = it->second.as<string>();
+   Log_info("%s", __FUNCTION__);
+   if (!config.IsMap()) return;
+   for (auto it = config.begin(); it != config.end(); ++it) {
+      std::string proc_name = it->first.IsScalar() ? it->first.Scalar() : "";
+      std::string host_name = it->second.IsScalar() ? it->second.Scalar() : "";
+      if (proc_name.empty()) continue;
       proc_host_map_[proc_name] = host_name;
       for (auto &group : replica_groups_) {
          for (auto &server : group.replicas) {
@@ -415,6 +419,7 @@ void Config::LoadHostYML(YAML::Node config) {
 }
 
 void Config::InitMode(string &cc_name, string &ab_name) {
+   Log_info("%s: cc_name=%s ab_name=%s", __FUNCTION__, cc_name.c_str(), ab_name.c_str());
    tx_proto_ = Frame::Name2Mode(cc_name);
 
    if ((cc_name == "rococo") || (cc_name == "deptran")) {
@@ -436,6 +441,7 @@ void Config::InitMode(string &cc_name, string &ab_name) {
 }
 
 void Config::InitBench(std::string &bench_str) {
+   Log_info("%s: bench=%s", __FUNCTION__, bench_str.c_str());
    if (bench_str == "tpca") {
       benchmark_ = TPCA;
    } else if (bench_str == "tpcc") {
@@ -487,6 +493,7 @@ std::string Config::site2host_name(std::string &sitename) {
 }
 
 void Config::LoadModeYML(YAML::Node config) {
+   Log_info("%s", __FUNCTION__);
    auto mode_str = config["cc"].as<string>();
    boost::algorithm::to_lower(mode_str);
    auto ab_str = config["ab"].as<string>();
@@ -509,14 +516,18 @@ void Config::LoadModeYML(YAML::Node config) {
 }
 
 void Config::LoadBenchYML(YAML::Node config) {
+   Log_info("%s", __FUNCTION__);
    std::string bench_str = config["workload"].as<string>();
    this->InitBench(bench_str);
    scale_factor_ = config["scale"].as<uint32_t>();
    auto weights = config["weight"];
-   for (auto it = weights.begin(); it != weights.end(); it++) {
-      auto txn_name = it->first.as<string>();
-      auto weight = it->second.as<double>();
-      txn_weights_[txn_name] = weight;
+   if (weights.IsMap()) {
+      for (auto it = weights.begin(); it != weights.end(); ++it) {
+         std::string txn_name = it->first.IsScalar() ? it->first.Scalar() : "";
+         if (txn_name.empty()) continue;
+         auto weight = it->second.as<double>();
+         txn_weights_[txn_name] = weight;
+      }
    }
 
    txn_weight_.push_back(txn_weights_["new_order"]);
@@ -529,19 +540,23 @@ void Config::LoadBenchYML(YAML::Node config) {
    auto populations = config["population"];
    auto &tb_infos = sharding_->tb_infos_;
    int n_dynamic_rows = 0;
-   for (auto it = populations.begin(); it != populations.end(); it++) {
-      auto tbl_name = it->first.as<string>();
-      auto info_it = tb_infos.find(tbl_name);
-      if (info_it == tb_infos.end()) {
-         tb_infos[tbl_name] = Sharding::tb_info_t();
-         info_it = tb_infos.find(tbl_name);
-      }
-      auto &tbl_info = info_it->second;
-      int pop = it->second.as<int>();
-      tbl_info.num_records = scale_factor_ * pop;
-      verify(tbl_info.num_records > 0);
-      if (bench_str == "dynamic") {
-         n_dynamic_rows = tbl_info.num_records;
+   if (populations.IsMap()) {
+      for (auto it = populations.begin(); it != populations.end(); ++it) {
+         std::string tbl_name = it->first.IsScalar() ? it->first.Scalar() : "";
+         if (tbl_name.empty()) continue;
+         auto info_it = tb_infos.find(tbl_name);
+         if (info_it == tb_infos.end()) {
+            tb_infos[tbl_name] = Sharding::tb_info_t();
+            info_it = tb_infos.find(tbl_name);
+         }
+         auto &tbl_info = info_it->second;
+         tbl_info.tb_name = tbl_name;
+         int pop = it->second.as<int>();
+         tbl_info.num_records = scale_factor_ * pop;
+         verify(tbl_info.num_records > 0);
+         if (bench_str == "dynamic") {
+            n_dynamic_rows = tbl_info.num_records;
+         }
       }
    }
    if (config["dist"]) dist_ = config["dist"].as<string>();
@@ -580,11 +595,14 @@ void Config::LoadBenchYML(YAML::Node config) {
 }
 
 void Config::LoadSchemaYML(YAML::Node config) {
+   Log_info("%s", __FUNCTION__);
    verify(sharding_);
    auto &tb_infos = sharding_->tb_infos_;
-   for (auto it = config.begin(); it != config.end(); it++) {
-      auto table_node = *it;
-      std::string tbl_name = table_node["name"].as<string>();
+   if (!config.IsSequence()) return;
+   for (auto table_node : config) {
+      if (!table_node["name"]) continue;
+      std::string tbl_name = table_node["name"].IsScalar() ? table_node["name"].Scalar() : table_node["name"].as<string>();
+      Log_info("  schema table: %s", tbl_name.c_str());
 
       auto info_it = tb_infos.find(tbl_name);
       if (info_it == tb_infos.end()) {
@@ -593,9 +611,10 @@ void Config::LoadSchemaYML(YAML::Node config) {
       }
       auto &tbl_info = info_it->second;
       auto columns = table_node["column"];
-      for (auto iitt = columns.begin(); iitt != columns.end(); iitt++) {
-         auto column = *iitt;
-         LoadSchemaTableColumnYML(tbl_info, column);
+      if (columns.IsSequence()) {
+         for (auto column : columns) {
+            LoadSchemaTableColumnYML(tbl_info, column);
+         }
       }
 
       tbl_info.tb_name = tbl_name;
@@ -744,39 +763,39 @@ void Config::LoadSchemaTableColumnYML(Sharding::tb_info_t &tb_info,
 void Config::LoadShardingYML(YAML::Node config) {
    verify(sharding_);
    auto &tb_infos = sharding_->tb_infos_;
-   for (auto it = config.begin(); it != config.end(); it++) {
-      auto tbl_name = it->first.as<string>();
-      auto info_it = tb_infos.find(tbl_name);
-      verify(info_it != tb_infos.end());
-      auto &tbl_info = info_it->second;
-      string method = it->second.as<string>();
+   if (config.IsMap()) {
+      for (auto it = config.begin(); it != config.end(); ++it) {
+         std::string tbl_name = it->first.IsScalar() ? it->first.Scalar() : "";
+         if (tbl_name.empty()) continue;
+         auto info_it = tb_infos.find(tbl_name);
+         verify(info_it != tb_infos.end());
+         auto &tbl_info = info_it->second;
+         string method = it->second.IsScalar() ? it->second.Scalar() : "";
 
-      Log_info("group size: %d", replica_groups_.size());
-      for (auto replica_group_it = this->replica_groups_.begin();
-           replica_group_it != this->replica_groups_.end();
-           replica_group_it++) {
-         auto &replica_group = *replica_group_it;
-         tbl_info.par_ids.push_back(replica_group.partition_id);
-         tbl_info.symbol = tbl_types_map_["sorted"];
+         Log_info("group size: %d", replica_groups_.size());
+         for (auto &replica_group : this->replica_groups_) {
+            tbl_info.par_ids.push_back(replica_group.partition_id);
+            tbl_info.symbol = tbl_types_map_["sorted"];
+         }
+         verify(tbl_info.par_ids.size() > 0);
       }
-
-      verify(tbl_info.par_ids.size() > 0);
    }
 }
 
 void Config::LoadClientYML(YAML::Node client) {
-   std::string type = client["type"].as<std::string>();
+   Log_info("%s", __FUNCTION__);
+   std::string type = client["type"] ? client["type"].as<std::string>("closed") : "closed";
    std::transform(type.begin(), type.end(), type.begin(), ::tolower);
    if (type == "open") {
       client_type_ = Open;
-      client_rate_ = client["rate"].as<int>();
-      client_max_undone_ = client["max_undone"].as<int>();
+      client_rate_ = client["rate"] ? client["rate"].as<int>(0) : 0;
+      client_max_undone_ = client["max_undone"] ? client["max_undone"].as<int>(0) : 0;
    } else {
       client_type_ = Closed;
       client_rate_ = -1;
       client_max_undone_ = -1;
    }
-   forwarding_enabled_ = client["forwarding"].as<bool>(false);
+   forwarding_enabled_ = client["forwarding"] ? client["forwarding"].as<bool>(false) : false;
    Log_info("client forwarding: %d", forwarding_enabled_);
 }
 

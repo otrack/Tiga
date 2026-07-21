@@ -31,7 +31,6 @@ cc_library(
         "-lboost_coroutine",
         "-lboost_context",
         "-lboost_thread",
-        "-lboost_system",
     ],
     visibility = ["//visibility:public"],
 )

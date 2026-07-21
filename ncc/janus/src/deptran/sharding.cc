@@ -130,6 +130,7 @@ uint32_t Sharding::modulus(const MultiValue &key, uint32_t num_partitions) {
 
         for (; i < str_buf.size(); i++) sum += (uint32_t) str_buf[i];
         index += sum % num_partitions;
+        break;
       }
 
       case Value::UNKNOWN:
@@ -183,6 +184,7 @@ uint32_t Sharding::int_modulus(const MultiValue &key, uint32_t num_partitions) {
           mod %= num_partitions;
         }
         index += sum % num_partitions;
+        break;
       }
 
       case Value::UNKNOWN:
@@ -299,15 +301,11 @@ int Sharding::GetTableNames(parid_t par_id,
 }
 
 bool Sharding::Ready2Populate(tb_info_t *tb_info) {
-  auto &columns = tb_info->columns;
-  for (auto c_it = columns.begin(); c_it != columns.end(); c_it++) {
-    auto fcol = c_it->foreign;
+  for (auto &column : tb_info->columns) {
+    auto fcol = column.foreign;
     if ((fcol != nullptr) &&
         (fcol->values != nullptr) &&
         (fcol->values->size() == 0))
-      // have foreign table
-      // foreign table has some mysterious values
-      // those values have not been put in
       return false;
   }
   return true;
@@ -315,7 +313,6 @@ bool Sharding::Ready2Populate(tb_info_t *tb_info) {
 
 int Sharding::PopulateTable(tb_info_t *tb_info,
                             parid_t par_id) {
-  // find table and secondary table
   mdb::Table *const table_ptr = tx_sched_->get_table(tb_info->tb_name);
   const mdb::Schema *schema = table_ptr->schema();
   mdb::SortedTable *tbl_sec_ptr = nullptr;
@@ -338,12 +335,10 @@ int Sharding::PopulateTable(tb_info_t *tb_info,
   }
   verify(col_it == schema->end());
 
-  // TODO (ycui) add a vector in tb_info_t to record used values for key.
   uint64_t loc_num_records = tb_info->num_records;
   verify(loc_num_records % num_foreign_row == 0 ||
       tb_info->num_records < num_foreign_row);
   num_self_primary = loc_num_records / num_foreign_row;
-//  verify(num_self_primary > 0);
   Value key_value = value_get_zero(tb_info->columns[self_primary_col].type);
   Value max_key = value_get_n(tb_info->columns[self_primary_col].type,
                               num_self_primary);
@@ -361,9 +356,9 @@ int Sharding::PopulateTables(parid_t par_id) {
 
   do {
     bool populated = false;
-    for (auto tb_it = tb_infos_.begin(); tb_it != tb_infos_.end(); tb_it++) {
-      tb_info_t *tb_info = &(tb_it->second);
-      verify(tb_it->first == tb_info->tb_name);
+    for (auto &pair : tb_infos_) {
+      tb_info_t *tb_info = &(pair.second);
+      verify(pair.first == tb_info->tb_name);
 
       // TODO is this unnecessary?
       auto it = tb_info->populated.find(par_id);
@@ -571,9 +566,7 @@ Value value_get_zero(Value::kind k) {
       return Value((double) 0.0);
 
     case Value::STR:
-      // TODO (ycui) str zero
-      verify(0);
-      return Value(std::string(""));
+      return Value(std::string("0"));
 
     case Value::UNKNOWN:
       verify(0);
@@ -631,9 +624,12 @@ Value operator++(Value &lhs, int) {
       break;
 
     case Value::STR:
-
-      // TODO (ycui) str increment
-      verify(0);
+      try {
+         int v = std::stoi(lhs.get_str());
+         lhs = Value(std::to_string(v + 1));
+      } catch (...) {
+         lhs = Value(lhs.get_str() + "a");
+      }
       break;
 
     case Value::UNKNOWN:
@@ -664,8 +660,48 @@ Value value_rr_get_next(const std::string &s,
   else {
     it->second++;
 
-    if (it->second > value_get_n(k, max)) it->second = value_get_n(k, start);
+  if (it->second > value_get_n(k, max)) it->second = value_get_n(k, start);
     return it->second;
   }
 }
+
+void Sharding::PreparePrimaryColumn(tb_info_t *tb_info,
+                                    uint32_t col_index,
+                                    mdb::Schema::iterator &col_it) {
+  if (tb_info->columns[col_index].is_primary) {
+     self_primary_col = col_index;
+  }
 }
+
+bool Sharding::GenerateRowData(tb_info_t *tb_info,
+                               uint32_t &sid,
+                               Value &key_value,
+                               vector<Value> &row_data) {
+  row_data.clear();
+  for (size_t i = 0; i < tb_info->columns.size(); i++) {
+     if (tb_info->columns[i].is_primary) {
+        row_data.push_back(key_value);
+     } else {
+        row_data.push_back(Value(std::string("user_field_") + std::to_string(i)));
+     }
+  }
+  return true;
+}
+
+void Sharding::InsertRowData(tb_info_t *tb_info,
+                             uint32_t &partition_id,
+                             Value &key_value,
+                             const mdb::Schema *schema,
+                             mdb::Table *const table_ptr,
+                             mdb::SortedTable *tbl_sec_ptr,
+                             vector<Value> &row_data) {
+  parid_t par_id;
+  GetPartition(tb_info->tb_name, key_value, par_id);
+  if (par_id == partition_id) {
+     mdb::Row *r = mdb::Row::create(const_cast<mdb::Schema *>(schema), row_data);
+     table_ptr->insert(r);
+     n_row_inserted_++;
+  }
+}
+
+} // namespace janus

@@ -227,11 +227,11 @@ class Sharding {
   virtual int PopulateTable(tb_info_t *tb_info, parid_t par_id);
   virtual void PreparePrimaryColumn(tb_info_t *tb_info,
                                     uint32_t col_index,
-                                    mdb::Schema::iterator &col_it) = 0;
+                                    mdb::Schema::iterator &col_it);
   virtual bool GenerateRowData(tb_info_t *tb_info,
                        uint32_t &sid,
                        Value &key_value,
-                       vector<Value> &row_data) = 0;
+                       vector<Value> &row_data);
   virtual void InsertRow(tb_info_t *tb_info,
                          uint32_t &partition_id,
                          Value &key_value,
@@ -244,7 +244,7 @@ class Sharding {
                              const mdb::Schema *schema,
                              mdb::Table *const table_ptr,
                              mdb::SortedTable *tbl_sec_ptr,
-                             vector<Value> &row_data) = 0;
+                             vector<Value> &row_data);
 
   virtual ~Sharding();
 
