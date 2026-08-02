@@ -69,8 +69,12 @@ TigaReplica::TigaReplica(const std::string& serverName,
 
    FailureRecoveryInit(config);
 
-   viewId_ = 0;
-   lastNormalView_ = 0;
+   if (config["designate_replica_id"] && config["designate_replica_id"][shardId_]) {
+      viewId_ = config["designate_replica_id"][shardId_].as<uint32_t>();
+   } else {
+      viewId_ = 0;
+   }
+   lastNormalView_ = viewId_;
    status_ = SERVER_STATUS::STATUS_NORMAL;
 
    std::string workloadStr = config["bench"]["workload"].as<std::string>();

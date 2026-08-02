@@ -4,19 +4,25 @@
 #include <algorithm>
 #include <cstdint>
 
+static jfieldID g_fid_clientHandle = nullptr;
+static jmethodID g_mid_mapPut = nullptr;
+
 int32_t hashKey(const std::string& key) {
     std::hash<std::string> hasher;
     return static_cast<int32_t>((hasher(key) & 0x7FFFFFFF) % 2000005);
 }
 
 void populateJavaMap(JNIEnv* env, jobject jmap, const std::string& field, const std::string& value) {
-    jclass mapClass = env->GetObjectClass(jmap);
-    jmethodID putMethod = env->GetMethodID(mapClass, "put",
-        "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
+    if (!g_mid_mapPut) {
+        jclass mapClass = env->GetObjectClass(jmap);
+        g_mid_mapPut = env->GetMethodID(mapClass, "put",
+            "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
+        env->DeleteLocalRef(mapClass);
+    }
     
     jstring jkey = env->NewStringUTF(field.c_str());
     jstring jval = env->NewStringUTF(value.c_str());
-    env->CallObjectMethod(jmap, putMethod, jkey, jval);
+    env->CallObjectMethod(jmap, g_mid_mapPut, jkey, jval);
     
     env->DeleteLocalRef(jkey);
     env->DeleteLocalRef(jval);
@@ -35,6 +41,12 @@ JNIEXPORT jlong JNICALL Java_com_tiga_ycsb_YcsbClient_initClient(JNIEnv *env, jo
     std::string mode = jstring2string(env, jmode);
     
     std::transform(mode.begin(), mode.end(), mode.begin(), ::tolower);
+
+    if (!g_fid_clientHandle) {
+        jclass thisClass = env->GetObjectClass(obj);
+        g_fid_clientHandle = env->GetFieldID(thisClass, "clientHandle", "J");
+        env->DeleteLocalRef(thisClass);
+    }
 
     try {
         BaseYcsbClient* client = nullptr;
@@ -65,9 +77,13 @@ JNIEXPORT void JNICALL Java_com_tiga_ycsb_YcsbClient_closeClient(JNIEnv *env, jo
 }
 
 static jint runClientTxn(JNIEnv *env, jobject obj, jstring jkey, jobject jfields, jobject jmap, uint32_t txnType) {
-    jclass thisClass = env->GetObjectClass(obj);
-    jfieldID fid = env->GetFieldID(thisClass, "clientHandle", "J");
-    jlong handle = env->GetLongField(obj, fid);
+    if (!g_fid_clientHandle) {
+        jclass thisClass = env->GetObjectClass(obj);
+        g_fid_clientHandle = env->GetFieldID(thisClass, "clientHandle", "J");
+        env->DeleteLocalRef(thisClass);
+    }
+
+    jlong handle = env->GetLongField(obj, g_fid_clientHandle);
     BaseYcsbClient* client = reinterpret_cast<BaseYcsbClient*>(handle);
     if (!client) return -1;
 
@@ -85,4 +101,22 @@ JNIEXPORT jint JNICALL Java_com_tiga_ycsb_YcsbClient_update(JNIEnv *env, jobject
 
 JNIEXPORT jint JNICALL Java_com_tiga_ycsb_YcsbClient_insert(JNIEnv *env, jobject obj, jstring jkey, jobject jmap) {
     return runClientTxn(env, obj, jkey, nullptr, jmap, 3);
+}
+
+JNIEXPORT jint JNICALL Java_com_tiga_ycsb_YcsbClient_transfer(JNIEnv *env, jobject obj, jstring jkey1, jstring jkey2, jstring jfield) {
+    if (!g_fid_clientHandle) {
+        jclass thisClass = env->GetObjectClass(obj);
+        g_fid_clientHandle = env->GetFieldID(thisClass, "clientHandle", "J");
+        env->DeleteLocalRef(thisClass);
+    }
+
+    jlong handle = env->GetLongField(obj, g_fid_clientHandle);
+    BaseYcsbClient* client = reinterpret_cast<BaseYcsbClient*>(handle);
+    if (!client) return -1;
+
+    std::string key1 = jstring2string(env, jkey1);
+    std::string key2 = jstring2string(env, jkey2);
+    std::string field = jstring2string(env, jfield);
+
+    return client->transfer(key1, key2, field, env);
 }

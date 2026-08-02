@@ -40,7 +40,7 @@ using namespace rrr;
 #define MAX_CLIENT_NUM (128000)
 // it refers to the max clients per VM/coordinator
 #define MAX_SHARD_NUM (6)
-#define MAX_REPLICA_NUM (3)
+#define MAX_REPLICA_NUM (16)
 #define MAX_COORDINATOR_NUM (16)
 #define TASK_CHANNEL_NUM (8)
 

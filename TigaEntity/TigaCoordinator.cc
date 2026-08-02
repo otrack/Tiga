@@ -30,9 +30,14 @@ void TigaCoordinator::DoOne(const ClientRequest& creq, TxnGenerator* txnGen) {
    // }
 
    // LOG(INFO) << "Submitted " << reqInProcess_.cmd_.reqId_;
+   if (reqInProcess_.cmd_.reqId_ <= 20) {
+      LOG(INFO) << "[COORD] DoOne clientReqId=" << creq.cmd_.reqId_ 
+                << " coordReqId=" << reqInProcess_.cmd_.reqId_
+                << " targetShardsCount=" << targetShards_.size();
+   }
+
    if (txnGen_->NeedDisPatch(creq)) {
       stage_ = STAGE::Dispatching;
-      // LOG(INFO) << "Dispatch " << reqInProcess_.cmd_.reqId_;
       Dispatch();
    } else {
       stage_ = STAGE::Commiting;
@@ -167,14 +172,9 @@ void TigaCoordinator::Abort() {
 
 void TigaCoordinator::OnFastReply(const uint32_t phase, const TigaReply& rep) {
    std::lock_guard<std::recursive_mutex> guard(mtx_);
+   if (phase != phase_) return;
    gInfo_->fastReplyNum1_++;
    if (false && rep.reqId_ <= 100000 && rep.reqId_ >= 50000) {
-      // LOG(INFO) << "rep=(" << rep.clientId_ << ":" << rep.reqId_ << ")"
-      //           << "ID=" << rep.shardId_ << ":" << rep.replicaId_
-      //           << "---owd=" << rep.owd_ << "--logId=" << rep.logId_
-      //           << "--specLogId=" << rep.specLogId_
-      //           << "--syncedLogId=" << rep.latestSyncedLogId_
-      //           << "--syncedSpecLogId=" << rep.latestSyncedSpecLogId_;
       LOG(INFO) << "rep=(" << rep.clientId_ << ":" << rep.reqId_ << ")---"
                 << rep.hash_.ToString() << "--deadline=" << rep.deadline_
                 << "---shardId=" << rep.shardId_
@@ -191,36 +191,23 @@ void TigaCoordinator::OnFastReply(const uint32_t phase, const TigaReply& rep) {
    }
 
    gInfo_->replyNumPerNode_[rep.shardId_][rep.replicaId_]++;
-   // if (gInfo_->fastReplyNum1_ % 10000 == 1) {
-   //    for (uint32_t sid = 0; sid < shardNum_; sid++) {
-   //       for (uint32_t rid = 0; rid < replicaNum_; rid++) {
-   //          LOG(INFO) << "(" << sid << "," << rid << "):\t"
-   //                    << gInfo_->replyNumPerNode_[sid][rid];
-   //       }
-   //    }
-   // }
    if (rep.owd_ > 0) {
-      // if (rep.replicaId_ == 2) {
-      //    LOG(INFO) << "owd " << rep.shardId_ << ":" << rep.replicaId_ << "--"
-      //              << rep.owd_;
-      // }
       gInfo_->owdQus_[rep.shardId_][rep.replicaId_].enqueue(rep.owd_);
    }
 
-   // if (rep.shardId_ == 0 && rep.replicaId_ == 1) {
-   //    LOG(INFO) << "owd=" << rep.owd_;
-   // }
-
-   if (phase != phase_) return;
    gInfo_->fastReplyNum2_++;
    if (gInfo_->fastReplyNum2_ % 100000 == 1) {
       LOG(INFO) << "totalReply " << gInfo_->fastReplyNum1_ << ":"
                 << gInfo_->fastReplyNum2_;
    }
 
-   // LOG(INFO) << "rep=(" << rep.clientId_ << ":" << rep.reqId_ << ")---"
-   //           << rep.hash_.ToString() << "---shardId=" << rep.shardId_
-   //           << "--replicaId=" << rep.replicaId_;
+   if (rep.reqId_ <= 20) {
+      LOG(INFO) << "[COORD] OnFastReply reqId=" << rep.reqId_
+                << " shardId=" << rep.shardId_
+                << " replicaId=" << rep.replicaId_
+                << " logId=" << rep.logId_
+                << " deadline=" << rep.deadline_;
+   }
 
    if (rep.deadline_ == UINT64_MAX) {
       // dummy replies
@@ -228,13 +215,6 @@ void TigaCoordinator::OnFastReply(const uint32_t phase, const TigaReply& rep) {
    }
    // Speculative Check
    gInfo_->replyQu_.enqueue({rep, this});
-
-   // LOG(INFO) << "replicaId=" << rep.replicaId_ << "--"
-   //           << "shardId=" << rep.shardId_ << "---" << rep.reqId_;
-
-   // LOG(INFO) << "replicaId=" << rep.replicaId_ << "--"
-   //           << "shardId=" << rep.shardId_ << "---" << rep.reqId_ << "--"
-   //           << rep.hash_.ToString() << "----logId=" << rep.logId_;
 }
 
 void TigaCoordinator::OnDispatchReply(const uint32_t phase,
@@ -269,6 +249,9 @@ void TigaCoordinator::Finish2() {
 
 void TigaCoordinator::Finish(TigaFastReplyQuorum& q) {
    std::lock_guard<std::recursive_mutex> guard(mtx_);
+   if (requestIdByClient_ <= 20) {
+      LOG(INFO) << "[COORD] Finish called for clientReqId=" << requestIdByClient_;
+   }
    ClientReply crep;
    crep.clientId_ = clientId_;
    crep.reqId_ = requestIdByClient_;
@@ -348,12 +331,16 @@ GlobalInfo::GlobalInfo(const uint32_t coordinatorId, const uint32_t shardNum,
              << "owdEstimationPercentile_=" << owdEstimationPercentile_;
 
    for (uint32_t sid = 0; sid < MAX_SHARD_NUM; sid++) {
+      uint32_t designatedLeader = 0;
+      if (config["designate_replica_id"] && config["designate_replica_id"][sid]) {
+         designatedLeader = config["designate_replica_id"][sid].as<uint32_t>();
+      }
       for (uint32_t rid = 0; rid < MAX_REPLICA_NUM; rid++) {
          estimatedOWDs_[sid][rid] = initBound_;
          if (owdEstimationPercentile_ == 0) {
             estimatedOWDs_[sid][rid] = 0;
          }
-         currentViews_[sid][rid] = 0;
+         currentViews_[sid][rid] = designatedLeader;
          currentGlobalViews_[sid][rid] = 0;
          currentSyncedLogIds_[sid][rid] = 0;
          serverStatus_[sid][rid] = STATUS_NORMAL;
@@ -475,8 +462,14 @@ void GlobalInfo::UpdateQuorumSet() {
          // complete but nonSerializable
          uint64_t agreedDeadline = 0;
          bool nonSerializable = isNonSerializable(q, &agreedDeadline);
-         // bool nonSerializable = false;  // debug
-         if (ret == 0 && (!nonSerializable)) {
+         if (rep.reqId_ <= 20) {
+            LOG(INFO) << "[COORD] UpdateQuorumSet reqId=" << rep.reqId_
+                      << " shardId=" << rep.shardId_
+                      << " repId=" << rep.replicaId_
+                      << " isTxnCommitted ret=" << ret
+                      << " nonSerializable=" << nonSerializable;
+         }
+         if (ret > 0 && (!nonSerializable)) {
             // LOG(INFO) << "committed-1 " << coordReqId
             //           << "--fastReplies=" << q.fastReplies_[0].size();
             // LOG(INFO) << "syncStatus=" << currentSyncedLogIds_[0][0] << "-"
@@ -501,6 +494,7 @@ void GlobalInfo::UpdateQuorumSet() {
 bool GlobalInfo::isNonSerializable(TigaFastReplyQuorum& q,
                                    uint64_t* agreedDeadline) {
    TigaCoordinator* coord = q.coord_;
+   if (coord == nullptr) return false;
    if (coord->targetShards_.size() == 1) {
       return false;
    }
@@ -571,21 +565,6 @@ void GlobalInfo::CheckQuorum() {
                 << " slow=" << slow
                 << " total=" << total
                 << " fast_pct=" << std::fixed << std::setprecision(1) << ratio << "%";
-      LOG(INFO) << "quorumSet =" << quorumSets_.size();
-      if (quorumSets_.size() > 0) {
-         LOG(INFO) << "--minReqId=" << quorumSets_.begin()->first;
-         int ret = isTxnCommitted(quorumSets_.begin()->second);
-         LOG(INFO) << "ret = " << ret;
-      }
-
-      for (uint32_t sid = 0; sid < shardNum_; sid++) {
-         for (uint32_t rid = 0; rid < replicaNum_; rid++) {
-            LOG(INFO) << "(" << sid << "," << rid
-                      << ")--syncedLogId=" << currentSyncedLogIds_[sid][rid]
-                      << "--specSyncedLogId="
-                      << currentSyncedSpecLogIds_[sid][rid];
-         }
-      }
       markTime_ = GetMicrosecondTimestamp();
    }
    for (auto& kv : quorumSets_) {
@@ -638,6 +617,9 @@ bool GlobalInfo::AddToQuorumSet(const TigaReply& rep, TigaCoordinator* coord) {
    if (quorumSets_.find(rep.reqId_) == quorumSets_.end()) {
       // LOG(INFO) << "Add to Q " << rep.reqId_;
       TigaFastReplyQuorum& q = quorumSets_[rep.reqId_];
+      for (uint32_t s = 0; s < MAX_SHARD_NUM; s++) {
+         q.viewIds_[s] = currentViews_[s][0];
+      }
       q.globalViewId_ = rep.gViewId_;
       q.viewIds_[rep.shardId_] = rep.viewId_;
       q.coord_ = coord;
@@ -690,6 +672,7 @@ int GlobalInfo::isTxnCommitted(TigaFastReplyQuorum& q) {
    // LOG(INFO) << "fastQuorumSize=" << fastQuorumSize
    //           << "--slowQuorumSize=" << slowQuorumSize;
    TigaCoordinator* coord = q.coord_;
+   if (coord == nullptr) return -1;
    bool hasSlowShard = false;
    for (auto& sId : coord->targetShards_) {
       uint32_t validFastReplies = 0;

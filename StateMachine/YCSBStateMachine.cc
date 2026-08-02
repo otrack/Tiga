@@ -17,7 +17,7 @@ void YCSBStateMachine::InitializeRelatedShards(
    shardKeyMap->clear();
    for (auto& kv : *ws) {
       uint32_t cell_key = kv.first;
-      uint32_t int_key = cell_key / 100;
+      uint32_t int_key = cell_key;
       (*shardKeyMap)[int_key % shardNum_].insert(cell_key);
    }
 }
@@ -29,8 +29,8 @@ void YCSBStateMachine::Execute(const uint32_t txnType,
                                const uint64_t txnId) {
    output->clear();
    for (auto& key : (*localKeys)) {
-      uint32_t int_key = key / 100;
-      uint32_t fieldId = key % 100;
+      uint32_t int_key = key;
+      uint32_t fieldId = 0;
       uint32_t mappedRecordId =
           int_key / shardNum_ + YCSB_MAX_KEY_NUM / shardNum_ * shardId_;
       
@@ -55,8 +55,8 @@ void YCSBStateMachine::SpecExecute(const uint32_t txnType,
                                    const uint64_t txnId) {
    output->clear();
    for (auto& key : *localKeys) {
-      uint32_t int_key = key / 100;
-      uint32_t fieldId = key % 100;
+      uint32_t int_key = key;
+      uint32_t fieldId = 0;
       uint32_t mappedRecordId =
           int_key / shardNum_ + YCSB_MAX_KEY_NUM / shardNum_ * shardId_;
       
@@ -77,8 +77,8 @@ void YCSBStateMachine::CommitExecute(const uint32_t txnType,
                                      std::map<int32_t, Value>* output,
                                      const uint64_t txnId) {
    for (auto& key : *localKeys) {
-      uint32_t int_key = key / 100;
-      uint32_t fieldId = key % 100;
+      uint32_t int_key = key;
+      uint32_t fieldId = 0;
       uint32_t mappedRecordId =
           int_key / shardNum_ + YCSB_MAX_KEY_NUM / shardNum_ * shardId_;
       

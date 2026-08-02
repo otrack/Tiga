@@ -237,6 +237,10 @@ void extractJavaMap(JNIEnv* env, jobject jmap, std::map<std::string, std::string
         env->DeleteLocalRef(jkey);
         env->DeleteLocalRef(jval);
     }
+    if (entryClass) env->DeleteLocalRef(entryClass);
+    env->DeleteLocalRef(iteratorClass);
+    env->DeleteLocalRef(setClass);
+    env->DeleteLocalRef(mapClass);
     env->DeleteLocalRef(iterator);
     env->DeleteLocalRef(entrySet);
 }
@@ -258,6 +262,8 @@ void extractJavaSet(JNIEnv* env, jobject jset, std::vector<std::string>& cppSet)
         env->ReleaseStringUTFChars(jitem, itemStr);
         env->DeleteLocalRef(jitem);
     }
+    env->DeleteLocalRef(iteratorClass);
+    env->DeleteLocalRef(setClass);
     env->DeleteLocalRef(iterator);
 }
 

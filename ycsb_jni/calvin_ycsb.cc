@@ -65,6 +65,10 @@ void extractJavaMap(JNIEnv* env, jobject jmap, std::map<std::string, std::string
         env->DeleteLocalRef(jkey);
         env->DeleteLocalRef(jval);
     }
+    if (entryClass) env->DeleteLocalRef(entryClass);
+    env->DeleteLocalRef(iteratorClass);
+    env->DeleteLocalRef(setClass);
+    env->DeleteLocalRef(mapClass);
     env->DeleteLocalRef(iterator);
     env->DeleteLocalRef(entrySet);
 }
@@ -86,6 +90,8 @@ void extractJavaSet(JNIEnv* env, jobject jset, std::vector<std::string>& cppSet)
         env->ReleaseStringUTFChars(jitem, itemStr);
         env->DeleteLocalRef(jitem);
     }
+    env->DeleteLocalRef(iteratorClass);
+    env->DeleteLocalRef(setClass);
     env->DeleteLocalRef(iterator);
 }
 
@@ -166,7 +172,8 @@ public:
     }
 
     int execute(uint32_t txnType, const std::string& key, JNIEnv* env, jobject jfields, jobject jmap) override {
-        int32_t int_key = hashKey(key);
+        int32_t record_id = hashKey(key);
+        int32_t int_key = record_id;
 
         ClientRequest req;
         req.cmd_.clientId_ = coordId_;
@@ -175,13 +182,13 @@ public:
 
         if (txnType == 1) { // Read
             req.cmd_.ws_[int_key].set_i32(0);
-            req.targetShards_.insert(int_key % shardNum_);
+            req.targetShards_.insert(record_id % shardNum_);
         } else if (txnType == 2 || txnType == 3) { // Update / Insert
             std::map<std::string, std::string> cppMap;
             extractJavaMap(env, jmap, cppMap);
             std::string payload = serializeMap(cppMap);
             req.cmd_.ws_[int_key].set_str(payload);
-            req.targetShards_.insert(int_key % shardNum_);
+            req.targetShards_.insert(record_id % shardNum_);
         }
 
         auto promise = std::make_shared<std::promise<ClientReply>>();
@@ -216,6 +223,33 @@ public:
             }
         }
 
+        return 0;
+    }
+
+    int transfer(const std::string& key1, const std::string& key2, const std::string& field, JNIEnv* env) override {
+        int32_t rec1 = hashKey(key1);
+        int32_t rec2 = hashKey(key2);
+
+        ClientRequest req;
+        req.cmd_.clientId_ = coordId_;
+        req.cmd_.reqId_ = nextRequestId_.fetch_add(1);
+        req.cmd_.txnType_ = 2; // YCSB_UPDATE
+
+        req.cmd_.ws_[rec1].set_str("transfer");
+        req.cmd_.ws_[rec2].set_str("transfer");
+
+        req.targetShards_.insert(rec1 % shardNum_);
+        req.targetShards_.insert(rec2 % shardNum_);
+
+        auto promise = std::make_shared<std::promise<ClientReply>>();
+        auto future = promise->get_future();
+
+        req.callback_ = [promise](const ClientReply& rep) {
+            promise->set_value(rep);
+        };
+
+        coord_->DoOne(req, txnGen_);
+        ClientReply reply = future.get();
         return 0;
     }
 };

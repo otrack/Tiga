@@ -8,11 +8,11 @@ class TigaCoordinator;
 
 struct TigaFastReplyQuorum {
    std::unordered_map<uint32_t, TigaReply> fastReplies_[MAX_SHARD_NUM];
-   uint32_t globalViewId_;
-   uint32_t viewIds_[MAX_SHARD_NUM];
-   uint32_t clientId_;
-   uint32_t reqId_;
-   TigaCoordinator* coord_;
+   uint32_t globalViewId_{0};
+   uint32_t viewIds_[MAX_SHARD_NUM]{0};
+   uint32_t clientId_{0};
+   uint32_t reqId_{0};
+   TigaCoordinator* coord_{nullptr};
 };
 
 struct GlobalInfo {
