@@ -1,12 +1,15 @@
 IMAGE_NAME := 0track/tiga-suite
 PROTOCOL   ?= tiga
 
-.PHONY: all build up down restart clean logs
+.PHONY: all build jni up down restart clean logs
 
 all: build
 
 build:
 	docker build -t $(IMAGE_NAME) .
+
+jni:
+	mvn install -f ycsb_jni/pom.xml -q
 
 up:
 	docker compose up -d

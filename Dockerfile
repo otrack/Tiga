@@ -69,6 +69,7 @@ COPY --from=builder /build/out/DetockEntity/DetockServer /usr/local/bin/
 COPY --from=builder /build/out/ycsb_jni/libtigaycsb.so /usr/local/lib/
 COPY --from=builder /build/out/ycsb_jni/libjanusycsb.so /usr/local/lib/
 COPY --from=builder /build/out/ncc/janus/deptran_server /usr/local/bin/
+COPY --from=builder /build/ycsb_jni/YcsbClient.java /usr/local/share/java/com/tiga/ycsb/YcsbClient.java
 
 WORKDIR /app
 
