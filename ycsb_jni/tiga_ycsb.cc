@@ -31,7 +31,7 @@ class TigaYcsbTxnGenerator : public TxnGenerator {
         if (txnType == 4) { // YCSB_SWAP
             input->clear();
             for (auto& kv : *existing) {
-                (*input)[kv.first] = mdb::Value();
+                (*input)[kv.first] = kv.second;
             }
         }
     }
