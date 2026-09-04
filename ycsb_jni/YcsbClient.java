@@ -1,6 +1,7 @@
 package com.tiga.ycsb;
 
 import java.util.Map;
+import java.util.Set;
 
 public class YcsbClient {
     static {
@@ -31,7 +32,9 @@ public class YcsbClient {
     private native long initClient(String configPath, String mode);
     private native void closeClient(long handle);
 
-    public native int read(String key, Map<String, String> result);
+    public native int read(String key, Set<String> fields, Map<String, String> result);
     public native int update(String key, Map<String, String> values);
     public native int insert(String key, Map<String, String> values);
+    public native int transfer(String key1, String key2, String field);
+    public native int swap(String[] keys, String field);
 }

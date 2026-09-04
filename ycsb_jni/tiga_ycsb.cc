@@ -20,6 +20,21 @@ class TigaYcsbTxnGenerator : public TxnGenerator {
     
     std::string RTTI() override { return "TigaYcsbTxnGenerator"; }
     void GetTxnReq(ClientRequest *req, uint32_t reqId, uint32_t cid) override {}
+
+    bool NeedDisPatch(const ClientRequest &req) override {
+        return req.cmd_.txnType_ == 4; // YCSB_SWAP
+    }
+
+    void GetInquireKeys(const uint32_t txnType,
+                        std::map<int32_t, mdb::Value>* existing,
+                        std::map<int32_t, mdb::Value>* input) override {
+        if (txnType == 4) { // YCSB_SWAP
+            input->clear();
+            for (auto& kv : *existing) {
+                (*input)[kv.first] = mdb::Value();
+            }
+        }
+    }
 };
 
 namespace {
@@ -267,6 +282,47 @@ public:
 
         coord_->DoOne(req, txnGen_);
         ClientReply reply = future.get();
+        return 0;
+    }
+
+    int swap(const std::vector<std::string>& keys, const std::string& field, JNIEnv* env) override {
+        ClientRequest req;
+        req.cmd_.clientId_ = info_->coordinatorId_;
+        req.cmd_.reqId_ = info_->nextRequestIdByProxy_.fetch_add(1);
+        req.cmd_.txnType_ = 4; // YCSB_SWAP
+
+        for (const auto& key : keys) {
+            int32_t int_key = hashKey(key);
+            req.cmd_.ws_[int_key].set_str("");
+            req.targetShards_.insert(int_key % shardNum_);
+        }
+
+        static std::atomic<uint64_t> swapCnt{0};
+        uint64_t curCnt = swapCnt.fetch_add(1);
+        if (curCnt < 20) {
+            LOG(INFO) << "[YCSB-CLIENT] swap #" << curCnt
+                      << " keyCount=" << keys.size()
+                      << " targetShardsCount=" << req.targetShards_.size()
+                      << " reqId=" << req.cmd_.reqId_;
+        }
+
+        auto promise = std::make_shared<std::promise<ClientReply>>();
+        auto future = promise->get_future();
+
+        req.callback_ = [promise, curCnt](const ClientReply& rep) {
+            if (curCnt < 20) {
+                LOG(INFO) << "[YCSB-CLIENT] swap callback invoked #" << curCnt;
+            }
+            promise->set_value(rep);
+        };
+
+        coord_->DoOne(req, txnGen_);
+
+        ClientReply reply = future.get();
+        if (curCnt < 20) {
+            LOG(INFO) << "[YCSB-CLIENT] swap future resolved #" << curCnt;
+        }
+
         return 0;
     }
 };

@@ -2,6 +2,7 @@
 #define YCSB_CLIENT_H
 
 #include <string>
+#include <vector>
 #include <cstdint>
 #include <jni.h>
 
@@ -10,6 +11,7 @@ public:
     virtual ~BaseYcsbClient() {}
     virtual int execute(uint32_t txnType, const std::string& key, JNIEnv* env, jobject jfields, jobject jmap) = 0;
     virtual int transfer(const std::string& key1, const std::string& key2, const std::string& field, JNIEnv* env) { return -1; }
+    virtual int swap(const std::vector<std::string>& keys, const std::string& field, JNIEnv* env) { return -1; }
 };
 
 BaseYcsbClient* createTigaClient(const std::string& configPath);

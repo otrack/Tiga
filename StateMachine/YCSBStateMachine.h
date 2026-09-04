@@ -6,7 +6,8 @@
 enum YCSB_TXN_TYPE {
    YCSB_READ = 1,
    YCSB_UPDATE,
-   YCSB_INSERT
+   YCSB_INSERT,
+   YCSB_SWAP = 4
 };
 
 #include <unordered_map>
@@ -52,6 +53,10 @@ class YCSBStateMachine : public StateMachine {
        const uint32_t txnType, std::map<int32_t, Value>* ws,
        std::map<uint32_t, std::set<int32_t>>* shardKeyMap) override;
 
-   uint32_t TotalNumberofKeys() override;
-   ~YCSBStateMachine();
+    void PreRead(const uint32_t txnType,
+                 const std::map<int32_t, Value>* input,
+                 std::map<int32_t, Value>* output) override;
+
+    uint32_t TotalNumberofKeys() override;
+    ~YCSBStateMachine();
 };

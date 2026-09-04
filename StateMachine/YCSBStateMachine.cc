@@ -44,6 +44,21 @@ void YCSBStateMachine::Execute(const uint32_t txnType,
          std::string newValue = (*input)[key].get_str();
          kvStore_[mappedRecordId][fieldId] = newValue;
          (*output)[key].set_str(newValue);
+      } else if (txnType == YCSB_TXN_TYPE::YCSB_SWAP) {
+         std::vector<std::pair<int32_t, std::string>> sortedKeys;
+         for (auto& kv : *input) {
+            sortedKeys.push_back({kv.first, kv.second.get_str()});
+         }
+         std::sort(sortedKeys.begin(), sortedKeys.end());
+         for (size_t i = 0; i < sortedKeys.size(); i++) {
+            if (sortedKeys[i].first == key) {
+               size_t prev = (i + sortedKeys.size() - 1) % sortedKeys.size();
+               std::string rotatedVal = sortedKeys[prev].second;
+               kvStore_[mappedRecordId][fieldId] = rotatedVal;
+               (*output)[key].set_str(rotatedVal);
+               break;
+            }
+         }
       }
    }
 }
@@ -54,6 +69,33 @@ void YCSBStateMachine::SpecExecute(const uint32_t txnType,
                                    std::map<int32_t, Value>* output,
                                    const uint64_t txnId) {
    output->clear();
+   if (txnType == YCSB_TXN_TYPE::YCSB_SWAP) {
+      std::vector<std::pair<int32_t, std::string>> sortedKeys;
+      for (auto& kv : *input) {
+         sortedKeys.push_back({kv.first, kv.second.get_str()});
+      }
+      std::sort(sortedKeys.begin(), sortedKeys.end());
+      for (auto& key : *localKeys) {
+         uint32_t int_key = key;
+         uint32_t fieldId = 0;
+         uint32_t mappedRecordId =
+             int_key / shardNum_ + YCSB_MAX_KEY_NUM / shardNum_ * shardId_;
+         if (fieldId >= kvStore_[mappedRecordId].size()) {
+            kvStore_[mappedRecordId].resize(fieldId + 1, "");
+         }
+         for (size_t i = 0; i < sortedKeys.size(); i++) {
+            if (sortedKeys[i].first == key) {
+               size_t prev = (i + sortedKeys.size() - 1) % sortedKeys.size();
+               std::string rotatedVal = sortedKeys[prev].second;
+               speculativeVersion_[key] = {txnId, rotatedVal};
+               kvStore_[mappedRecordId][fieldId] = rotatedVal;
+               (*output)[key].set_str(rotatedVal);
+               break;
+            }
+         }
+      }
+      return;
+   }
    for (auto& key : *localKeys) {
       uint32_t int_key = key;
       uint32_t fieldId = 0;
@@ -100,6 +142,26 @@ void YCSBStateMachine::RollbackExecute(const uint32_t txnType,
    output->clear();
    for (auto& key : *localKeys) {
       speculativeVersion_.erase(key);
+   }
+}
+
+void YCSBStateMachine::PreRead(const uint32_t txnType,
+                                const std::map<int32_t, Value>* input,
+                                std::map<int32_t, Value>* output) {
+   output->clear();
+   if (txnType == YCSB_TXN_TYPE::YCSB_SWAP) {
+      for (auto& kv : *input) {
+         int32_t key = kv.first;
+         uint32_t int_key = key;
+         uint32_t fieldId = 0;
+         uint32_t mappedRecordId =
+             int_key / shardNum_ + YCSB_MAX_KEY_NUM / shardNum_ * shardId_;
+         if (fieldId < kvStore_[mappedRecordId].size()) {
+            (*output)[key].set_str(kvStore_[mappedRecordId][fieldId]);
+         } else {
+            (*output)[key].set_str("");
+         }
+      }
    }
 }
 

@@ -120,3 +120,28 @@ JNIEXPORT jint JNICALL Java_com_tiga_ycsb_YcsbClient_transfer(JNIEnv *env, jobje
 
     return client->transfer(key1, key2, field, env);
 }
+
+JNIEXPORT jint JNICALL Java_com_tiga_ycsb_YcsbClient_swap(JNIEnv *env, jobject obj, jobjectArray jkeys, jstring jfield) {
+    if (!g_fid_clientHandle) {
+        jclass thisClass = env->GetObjectClass(obj);
+        g_fid_clientHandle = env->GetFieldID(thisClass, "clientHandle", "J");
+        env->DeleteLocalRef(thisClass);
+    }
+
+    jlong handle = env->GetLongField(obj, g_fid_clientHandle);
+    BaseYcsbClient* client = reinterpret_cast<BaseYcsbClient*>(handle);
+    if (!client) return -1;
+
+    std::string field = jstring2string(env, jfield);
+
+    jsize len = env->GetArrayLength(jkeys);
+    std::vector<std::string> keys;
+    keys.reserve(len);
+    for (jsize i = 0; i < len; i++) {
+        jstring jkey = (jstring)env->GetObjectArrayElement(jkeys, i);
+        keys.push_back(jstring2string(env, jkey));
+        env->DeleteLocalRef(jkey);
+    }
+
+    return client->swap(keys, field, env);
+}

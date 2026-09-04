@@ -55,6 +55,14 @@ JNIEXPORT jint JNICALL Java_com_tiga_ycsb_YcsbClient_insert
 JNIEXPORT jint JNICALL Java_com_tiga_ycsb_YcsbClient_transfer
   (JNIEnv *, jobject, jstring, jstring, jstring);
 
+/*
+ * Class:     com_tiga_ycsb_YcsbClient
+ * Method:    swap
+ * Signature: ([Ljava/lang/String;Ljava/lang/String;)I
+ */
+JNIEXPORT jint JNICALL Java_com_tiga_ycsb_YcsbClient_swap
+  (JNIEnv *, jobject, jobjectArray, jstring);
+
 #ifdef __cplusplus
 }
 #endif
