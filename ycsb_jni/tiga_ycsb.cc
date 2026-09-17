@@ -224,11 +224,16 @@ public:
             if (curCnt < 20) {
                 LOG(INFO) << "[YCSB-CLIENT] callback invoked #" << curCnt;
             }
-            promise->set_value(rep);
+            try { promise->set_value(rep); } catch (const std::future_error&) {}
         };
 
         coord_->DoOne(req, txnGen_);
 
+        auto status = future.wait_for(std::chrono::seconds(30));
+        if (status == std::future_status::timeout) {
+            LOG(WARNING) << "[YCSB-CLIENT] execute timeout #" << curCnt;
+            return -1;
+        }
         ClientReply reply = future.get();
         if (curCnt < 20) {
             LOG(INFO) << "[YCSB-CLIENT] future resolved #" << curCnt;
@@ -277,10 +282,15 @@ public:
         auto future = promise->get_future();
 
         req.callback_ = [promise](const ClientReply& rep) {
-            promise->set_value(rep);
+            try { promise->set_value(rep); } catch (const std::future_error&) {}
         };
 
         coord_->DoOne(req, txnGen_);
+        auto status = future.wait_for(std::chrono::seconds(30));
+        if (status == std::future_status::timeout) {
+            LOG(WARNING) << "[YCSB-CLIENT] transfer timeout";
+            return -1;
+        }
         ClientReply reply = future.get();
         return 0;
     }
@@ -313,11 +323,16 @@ public:
             if (curCnt < 20) {
                 LOG(INFO) << "[YCSB-CLIENT] swap callback invoked #" << curCnt;
             }
-            promise->set_value(rep);
+            try { promise->set_value(rep); } catch (const std::future_error&) {}
         };
 
         coord_->DoOne(req, txnGen_);
 
+        auto status = future.wait_for(std::chrono::seconds(30));
+        if (status == std::future_status::timeout) {
+            LOG(WARNING) << "[YCSB-CLIENT] swap timeout #" << curCnt;
+            return -1;
+        }
         ClientReply reply = future.get();
         if (curCnt < 20) {
             LOG(INFO) << "[YCSB-CLIENT] swap future resolved #" << curCnt;
