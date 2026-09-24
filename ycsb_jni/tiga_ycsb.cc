@@ -154,7 +154,6 @@ public:
     YAML::Node config_;
     TigaCommunicator* comm_;
     GlobalInfo* info_;
-    TigaCoordinator* coord_;
     TigaYcsbTxnGenerator* txnGen_;
     uint32_t shardNum_;
     uint32_t replicaNum_;
@@ -177,10 +176,7 @@ public:
         comm_ = new TigaCommunicator(coordId, config_);
         comm_->Connect();
         info_ = new GlobalInfo(coordId, shardNum_, replicaNum_, 400000, 60000, 10000, comm_);
-        
-        coord_ = new TigaCoordinator(coordId, config_);
-        coord_->SetGlobalInfo(info_);
-        
+
         txnGen_ = new TigaYcsbTxnGenerator(shardNum_, replicaNum_, config_);
     }
 
@@ -192,11 +188,13 @@ public:
         // Stop daemon/inquiry threads first: they reference comm_ (ProxyAt).
         info_->Shutdown();
         // Destroy the communicator (joins its poller thread), so no late RPC
-        // replies can invoke callbacks that touch info_/coord_ afterwards.
+        // replies can invoke callbacks that touch info_/coordinators afterwards.
         delete comm_;
         // Only now is it safe to free the objects those callbacks referenced.
         delete info_;
-        delete coord_;
+        for (TigaCoordinator* c : poolCreated_) {
+            delete c;
+        }
         delete txnGen_;
     }
 
@@ -231,24 +229,11 @@ public:
                       << " reqId=" << req.cmd_.reqId_;
         }
 
-        auto promise = std::make_shared<std::promise<ClientReply>>();
-        auto future = promise->get_future();
-
-        req.callback_ = [promise, curCnt](const ClientReply& rep) {
-            if (curCnt < 20) {
-                LOG(INFO) << "[YCSB-CLIENT] callback invoked #" << curCnt;
-            }
-            try { promise->set_value(rep); } catch (const std::future_error&) {}
-        };
-
-        coord_->DoOne(req, txnGen_);
-
-        auto status = future.wait_for(std::chrono::seconds(30));
-        if (status == std::future_status::timeout) {
+        ClientReply reply;
+        if (!Submit(req, &reply)) {
             LOG(WARNING) << "[YCSB-CLIENT] execute timeout #" << curCnt;
             return -1;
         }
-        ClientReply reply = future.get();
         if (curCnt < 20) {
             LOG(INFO) << "[YCSB-CLIENT] future resolved #" << curCnt;
         }
@@ -292,20 +277,11 @@ public:
         req.targetShards_.insert(rec1 % shardNum_);
         req.targetShards_.insert(rec2 % shardNum_);
 
-        auto promise = std::make_shared<std::promise<ClientReply>>();
-        auto future = promise->get_future();
-
-        req.callback_ = [promise](const ClientReply& rep) {
-            try { promise->set_value(rep); } catch (const std::future_error&) {}
-        };
-
-        coord_->DoOne(req, txnGen_);
-        auto status = future.wait_for(std::chrono::seconds(30));
-        if (status == std::future_status::timeout) {
+        ClientReply reply;
+        if (!Submit(req, &reply)) {
             LOG(WARNING) << "[YCSB-CLIENT] transfer timeout";
             return -1;
         }
-        ClientReply reply = future.get();
         return 0;
     }
 
@@ -330,24 +306,11 @@ public:
                       << " reqId=" << req.cmd_.reqId_;
         }
 
-        auto promise = std::make_shared<std::promise<ClientReply>>();
-        auto future = promise->get_future();
-
-        req.callback_ = [promise, curCnt](const ClientReply& rep) {
-            if (curCnt < 20) {
-                LOG(INFO) << "[YCSB-CLIENT] swap callback invoked #" << curCnt;
-            }
-            try { promise->set_value(rep); } catch (const std::future_error&) {}
-        };
-
-        coord_->DoOne(req, txnGen_);
-
-        auto status = future.wait_for(std::chrono::seconds(30));
-        if (status == std::future_status::timeout) {
+        ClientReply reply;
+        if (!Submit(req, &reply)) {
             LOG(WARNING) << "[YCSB-CLIENT] swap timeout #" << curCnt;
             return -1;
         }
-        ClientReply reply = future.get();
         if (curCnt < 20) {
             LOG(INFO) << "[YCSB-CLIENT] swap future resolved #" << curCnt;
         }
@@ -388,6 +351,8 @@ public:
     }
 
     TigaCoordinator* PopCoordinator();
+    void PushCoordinator(TigaCoordinator* coo);
+    bool Submit(ClientRequest& req, ClientReply* reply);
     void OpenLoopDispatch(TigaCoordinator* coo);
     void OpenLoopRequestDone(TigaCoordinator* coo);
     void RunOpenLoop(uint32_t rate, uint32_t maxOutstanding, uint32_t runSec);
@@ -403,8 +368,93 @@ public:
 
 std::atomic<uint32_t> TigaYcsbClient::nextCoordinatorId_{0};
 
+namespace {
+
+// YCSB creates one DB (hence one native client) per worker thread.  A
+// TigaYcsbClient owns a communicator, a GlobalInfo and their threads, so all
+// the handles of a JVM share a single one; each in-flight request gets its own
+// pooled TigaCoordinator instead.
+std::mutex sharedMtx;
+TigaYcsbClient* sharedClient = nullptr;
+std::string sharedConfigPath;
+uint32_t sharedRefs = 0;
+
+class TigaYcsbClientRef : public BaseYcsbClient {
+  public:
+    explicit TigaYcsbClientRef(TigaYcsbClient* client) : client_(client) {}
+
+    ~TigaYcsbClientRef() override {
+        std::lock_guard<std::mutex> lock(sharedMtx);
+        if (--sharedRefs == 0) {
+            delete sharedClient;
+            sharedClient = nullptr;
+        }
+    }
+
+    int execute(uint32_t txnType, const std::string& key, JNIEnv* env, jobject jfields, jobject jmap) override {
+        return client_->execute(txnType, key, env, jfields, jmap);
+    }
+
+    int transfer(const std::string& key1, const std::string& key2, const std::string& field, JNIEnv* env) override {
+        return client_->transfer(key1, key2, field, env);
+    }
+
+    int swap(const std::vector<std::string>& keys, const std::string& field, JNIEnv* env) override {
+        return client_->swap(keys, field, env);
+    }
+
+    int runSwapOpenLoop(uint32_t rate, uint32_t maxOutstanding, uint32_t runSec,
+                        uint32_t recordCount, uint32_t swapSize) override {
+        return client_->runSwapOpenLoop(rate, maxOutstanding, runSec, recordCount, swapSize);
+    }
+
+    int setOpenLoopArrival(int mode) override {
+        return client_->setOpenLoopArrival(mode);
+    }
+
+  private:
+    TigaYcsbClient* client_;
+};
+
+} // namespace
+
 BaseYcsbClient* createTigaClient(const std::string& configPath) {
-    return new TigaYcsbClient(configPath);
+    std::lock_guard<std::mutex> lock(sharedMtx);
+    if (sharedClient == nullptr) {
+        sharedClient = new TigaYcsbClient(configPath);
+        sharedConfigPath = configPath;
+    } else if (configPath != sharedConfigPath) {
+        LOG(WARNING) << "[YCSB-CLIENT] ignoring config " << configPath
+                     << ", sharing the client built from " << sharedConfigPath;
+    }
+    sharedRefs++;
+    return new TigaYcsbClientRef(sharedClient);
+}
+
+void TigaYcsbClient::PushCoordinator(TigaCoordinator* coo) {
+    std::lock_guard<std::mutex> lock(poolMtx_);
+    poolFree_.push_back(coo);
+}
+
+// Runs req on a pooled coordinator and waits for its reply.  On timeout the
+// coordinator is not returned to the pool: a late commit would otherwise fire
+// the callback of whichever request reuses it.  It is freed at teardown.
+bool TigaYcsbClient::Submit(ClientRequest& req, ClientReply* reply) {
+    auto promise = std::make_shared<std::promise<ClientReply>>();
+    auto future = promise->get_future();
+    req.callback_ = [promise](const ClientReply& rep) {
+        try { promise->set_value(rep); } catch (const std::future_error&) {}
+    };
+
+    TigaCoordinator* coo = PopCoordinator();
+    coo->DoOne(req, txnGen_);
+
+    if (future.wait_for(std::chrono::seconds(30)) == std::future_status::timeout) {
+        return false;
+    }
+    *reply = future.get();
+    PushCoordinator(coo);
+    return true;
 }
 
 TigaCoordinator* TigaYcsbClient::PopCoordinator() {
@@ -459,10 +509,7 @@ void TigaYcsbClient::OpenLoopRequestDone(TigaCoordinator* coo) {
                             (uint32_t)coo->detectReplicationInconsistency_,
                             (uint32_t)coo->detectNonSerial_});
     }
-    {
-        std::lock_guard<std::mutex> lock(poolMtx_);
-        poolFree_.push_back(coo);
-    }
+    PushCoordinator(coo);
 }
 
 void TigaYcsbClient::RunOpenLoop(uint32_t rate, uint32_t maxOutstanding,
