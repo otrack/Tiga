@@ -12,6 +12,24 @@ TigaReplica::TigaReplica(const std::string& serverName,
       owdDeltaUs_ = 0;
    }
 
+   lateProbeLevel_ = 0;
+   lateProbeTraceCap_ = 500;
+   if (config["probe_lateness"].IsDefined()) {
+      lateProbeLevel_ = config["probe_lateness"].as<int32_t>();
+   }
+   if (config["probe_lateness_trace_cap"].IsDefined()) {
+      lateProbeTraceCap_ = config["probe_lateness_trace_cap"].as<uint32_t>();
+   }
+   lateProbeNum_ = 0;
+   lateProbeLateNum_ = 0;
+   lateProbeLateSumUs_ = 0;
+   lateProbeMaxLateUs_ = 0;
+   lateProbeSettledNum_ = 0;
+   lateProbeSpecNum_ = 0;
+   lateProbeSettledLateNum_ = 0;
+   lateProbeSpecLateNum_ = 0;
+   lateProbeTraceNum_ = 0;
+
    reconcliationRequstNum_ = 0;
    normalRequestNum_ = 0;
 
@@ -580,6 +598,7 @@ void TigaReplica::LeaderPreExecTd() {
       if (GetMicrosecondTimestamp() - debugTime >= 1000 * 1000) {
          LOG(INFO) << "weird 0; conflicted 0; slow " << nSlowCommits_.load() 
                    << "; fast " << nFastCommits_.load();
+         LateProbePeriodic();
          debugTime = GetMicrosecondTimestamp();
       }
    }
@@ -947,6 +966,7 @@ void TigaReplica::FollowerExecTd() {
 
             // Make Hash and send reply
             bool canSlowReply = false;
+            uint64_t boundaryDeadlineProbe = 0;
 
             for (auto& key : entry->localKeys_) {
                EntryQu<TigaLogEntry>* entryQu =
@@ -978,6 +998,7 @@ void TigaReplica::FollowerExecTd() {
                   boundarySyncedHashMarks_[key].deadlineRank_ =
                       item->deadlineRank_;
                }
+               boundaryDeadlineProbe = boundarySyncedHashMarks_[key].deadlineRank_;
                //////
                if (entry->localDdlRank_ <=
                    boundarySyncedHashMarks_[key].deadlineRank_) {
@@ -1028,6 +1049,8 @@ void TigaReplica::FollowerExecTd() {
                // verify(entry->replyHandler_ != NULL);
                // entry->replyHandler_(*replyPtr);
             }
+
+            LateProbeRecordDecision(entry, canSlowReply, boundaryDeadlineProbe);
 
             entry->execStatus_ = EXEC_COMPLETE;
             toReplyQu_.enqueue(entry);
@@ -1230,6 +1253,7 @@ void TigaReplica::onNormalRequest(const TigaReq& req, TigaReply* rep,
       // Too close
       entry->owd_ = 1000;  // 1ms as default
    }
+   LateProbeRecordOnArrival(entry, nowTime, req.bound_);
 
    // if (shardId_ == 0 && replicaId_ == 1 && entry->cmd_->clientId_ == 2) {
    //    LOG(INFO) << "My OWD =" << entry->ID() << "--" << entry->owd_
@@ -1239,6 +1263,75 @@ void TigaReplica::onNormalRequest(const TigaReq& req, TigaReply* rep,
    // LOG(INFO) << "owd=" << entry->owd_ << "--nowTime=" << nowTime
    //           << "\t sendTime=" << entry->sendTime_;
    toHoldAndReleaseQu_.enqueue(entry);
+}
+
+void TigaReplica::LateProbeRecordOnArrival(TigaLogEntry* entry,
+                                           uint64_t nowTime, uint32_t bound) {
+   if (lateProbeLevel_ <= 0) return;
+   int64_t deadline = (int64_t)entry->sendTime_ + (int64_t)bound;
+   int64_t lateUs = (int64_t)nowTime - deadline;
+   lateProbeNum_++;
+   if (lateUs > 0) {
+      lateProbeLateNum_++;
+      lateProbeLateSumUs_ += (uint64_t)lateUs;
+      if (lateProbeMaxLateUs_.load() < lateUs) {
+         lateProbeMaxLateUs_.store(lateUs);
+      }
+   }
+   if (lateProbeLevel_ >= 2 &&
+       lateProbeTraceNum_.fetch_add(1) < lateProbeTraceCap_) {
+      LOG(INFO) << "[LATE-PROBE] arrival rid=" << replicaId_
+                << " sid=" << shardId_ << " client=" << entry->cmd_->clientId_
+                << " req=" << entry->cmd_->reqId_
+                << " txnKey=" << entry->cmd_->TxnKey()
+                << " sendTime=" << entry->sendTime_ << " arrival=" << nowTime
+                << " deadline=" << deadline << " owd=" << entry->owd_
+                << " bound=" << bound << " lateUs=" << lateUs;
+   }
+}
+
+void TigaReplica::LateProbeRecordDecision(TigaLogEntry* entry,
+                                          bool canSlowReply,
+                                          uint64_t boundaryDeadlineRank) {
+   if (lateProbeLevel_ <= 0) return;
+   // Same arrival-vs-deadline measure as LateProbeRecordOnArrival,
+   // re-derived from the entry fields.
+   int64_t lateUs = (int64_t)entry->owd_ -
+                    ((int64_t)entry->localDdlRank_ - (int64_t)entry->sendTime_);
+   if (canSlowReply) {
+      lateProbeSettledNum_++;
+      if (lateUs > 0) lateProbeSettledLateNum_++;
+   } else {
+      lateProbeSpecNum_++;
+      if (lateUs > 0) lateProbeSpecLateNum_++;
+   }
+   if (lateProbeLevel_ >= 2 &&
+       lateProbeTraceNum_.fetch_add(1) < lateProbeTraceCap_) {
+      LOG(INFO) << "[LATE-PROBE] decision rid=" << replicaId_
+                << " sid=" << shardId_ << " client=" << entry->cmd_->clientId_
+                << " req=" << entry->cmd_->reqId_
+                << " txnKey=" << entry->cmd_->TxnKey()
+                << " canSlowReply=" << (int)canSlowReply
+                << " hasHash=" << (int)(!canSlowReply)
+                << " lateUs=" << lateUs
+                << " ddlRank=" << entry->localDdlRank_
+                << " boundaryDdl=" << boundaryDeadlineRank;
+   }
+}
+
+void TigaReplica::LateProbePeriodic() {
+   if (lateProbeLevel_ <= 0) return;
+   uint64_t total = lateProbeNum_.load();
+   uint64_t late = lateProbeLateNum_.load();
+   uint64_t sum = lateProbeLateSumUs_.load();
+   uint64_t avg = total > 0 ? sum / total : 0;
+   LOG(INFO) << "[LATE-PROBE] periodic rid=" << replicaId_
+             << " sid=" << shardId_ << " total=" << total << " late=" << late
+             << " maxLateUs=" << lateProbeMaxLateUs_.load()
+             << " avgLateUs=" << avg << " settled=" << lateProbeSettledNum_
+             << " spec=" << lateProbeSpecNum_
+             << " settledLate=" << lateProbeSettledLateNum_
+             << " specLate=" << lateProbeSpecLateNum_;
 }
 
 void TigaReplica::onDeadlineAgreementRequest(

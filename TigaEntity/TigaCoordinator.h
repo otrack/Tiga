@@ -1,4 +1,6 @@
 #pragma once
+#include <mutex>
+#include <unordered_map>
 #include "TigaService/TigaCommunicator.h"
 #include "TigaService/TigaServiceImpl.h"
 #include "TxnGenerator/MicroTxnGenerator.h"
@@ -13,6 +15,9 @@ struct TigaFastReplyQuorum {
    uint32_t clientId_{0};
    uint32_t reqId_{0};
    TigaCoordinator* coord_{nullptr};
+   // Lateness probes: per-replica arrival-vs-deadline aggregates
+   uint32_t lateReplicaNum_{0};
+   int64_t lateMaxUs_{0};
 };
 
 struct GlobalInfo {
@@ -50,6 +55,26 @@ struct GlobalInfo {
    uint32_t yieldPeriodUs_;
    int32_t owdDeltaUs_;
    uint32_t owdEstimationPercentile_;
+
+   // Lateness probes (controlled by config "probe_lateness": 0=off,
+   // 1=counters+periodic, 2=+per-txn traces). A txn is "late" at a replica
+   // if it arrived after its deadline (deadline = sendTime + bound).
+   int32_t lateProbeLevel_;
+   uint32_t lateProbeTraceCap_;
+   std::mutex lateProbeMtx_;
+   std::unordered_map<uint32_t, int64_t> lateProbeBoundByReqId_;
+   std::atomic<uint64_t> lateProbeReplicaTotal_[MAX_SHARD_NUM][MAX_REPLICA_NUM];
+   std::atomic<uint64_t> lateProbeReplicaLateNum_[MAX_SHARD_NUM]
+                                                  [MAX_REPLICA_NUM];
+   std::atomic<int64_t> lateProbeReplicaMaxLateUs_[MAX_SHARD_NUM]
+                                                  [MAX_REPLICA_NUM];
+   std::atomic<uint64_t> lateProbeReplicaLateSumUs_[MAX_SHARD_NUM]
+                                                   [MAX_REPLICA_NUM];
+   std::atomic<uint64_t> lateProbeCommittedFast_;
+   std::atomic<uint64_t> lateProbeCommittedSlow_;
+   std::atomic<uint64_t> lateProbeCommittedFastLate_;
+   std::atomic<uint64_t> lateProbeCommittedSlowLate_;
+   std::atomic<uint64_t> lateProbeTraceNum_;
    ConcurrentQueue<std::pair<TigaReply, TigaCoordinator*>> replyQu_;
    std::unordered_set<uint32_t> committedCoordReqIds_;
    std::map<uint32_t, TigaFastReplyQuorum>
