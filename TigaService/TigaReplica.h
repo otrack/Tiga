@@ -364,26 +364,26 @@ class TigaReplica {
    std::atomic<uint64_t> nFastCommits_;
    std::atomic<uint64_t> nSlowCommits_;
 
-   // Lateness probes (controlled by config "probe_lateness": 0=off,
-   // 1=counters+periodic, 2=+per-txn traces). A txn is "late" if it arrives
-   // at this replica after its deadline (deadline = sendTime + bound).
-   int32_t lateProbeLevel_;
-   uint32_t lateProbeTraceCap_;
-   std::atomic<uint64_t> lateProbeNum_;
-   std::atomic<uint64_t> lateProbeLateNum_;
-   std::atomic<uint64_t> lateProbeLateSumUs_;
-   std::atomic<int64_t> lateProbeMaxLateUs_;
-   std::atomic<uint64_t> lateProbeSettledNum_;
-   std::atomic<uint64_t> lateProbeSpecNum_;
-   std::atomic<uint64_t> lateProbeSettledLateNum_;
-   std::atomic<uint64_t> lateProbeSpecLateNum_;
-   std::atomic<uint64_t> lateProbeTraceNum_;
+   // Headroom probes (controlled by config "probe_lateness": 0=off,
+   // 1=counters+periodic, 2=+per-txn traces). A txn "misses" its headroom if
+   // it arrives at this replica after its deadline (deadline = sendTime+bound).
+   int32_t probeLevel_;
+   uint32_t probeTraceCap_;
+   std::atomic<uint64_t> probeSeen_;
+   std::atomic<uint64_t> probeMissNum_;
+   std::atomic<uint64_t> probeMissSumUs_;
+   std::atomic<int64_t> probeMaxMissUs_;
+   std::atomic<uint64_t> probeSettledNum_;
+   std::atomic<uint64_t> probeSpecNum_;
+   std::atomic<uint64_t> probeSettledMissNum_;
+   std::atomic<uint64_t> probeSpecMissNum_;
+   std::atomic<uint64_t> probeTraceNum_;
 
-   void LateProbeRecordOnArrival(TigaLogEntry* entry, uint64_t nowTime,
-                                 uint32_t bound);
-   void LateProbeRecordDecision(TigaLogEntry* entry, bool canSlowReply,
-                                uint64_t boundaryDeadlineRank);
-   void LateProbePeriodic();
+   void ProbeRecordArrival(TigaLogEntry* entry, uint64_t nowTime,
+                           uint32_t bound);
+   void ProbeRecordDecision(TigaLogEntry* entry, bool canSlowReply,
+                            uint64_t boundaryDeadlineRank);
+   void ProbePeriodic();
 
    bool killed_;
 };

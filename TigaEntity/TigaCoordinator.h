@@ -56,25 +56,27 @@ struct GlobalInfo {
    int32_t owdDeltaUs_;
    uint32_t owdEstimationPercentile_;
 
-   // Lateness probes (controlled by config "probe_lateness": 0=off,
-   // 1=counters+periodic, 2=+per-txn traces). A txn is "late" at a replica
-   // if it arrived after its deadline (deadline = sendTime + bound).
-   int32_t lateProbeLevel_;
-   uint32_t lateProbeTraceCap_;
-   std::mutex lateProbeMtx_;
-   std::unordered_map<uint32_t, int64_t> lateProbeBoundByReqId_;
-   std::atomic<uint64_t> lateProbeReplicaTotal_[MAX_SHARD_NUM][MAX_REPLICA_NUM];
-   std::atomic<uint64_t> lateProbeReplicaLateNum_[MAX_SHARD_NUM]
-                                                  [MAX_REPLICA_NUM];
-   std::atomic<int64_t> lateProbeReplicaMaxLateUs_[MAX_SHARD_NUM]
-                                                  [MAX_REPLICA_NUM];
-   std::atomic<uint64_t> lateProbeReplicaLateSumUs_[MAX_SHARD_NUM]
-                                                   [MAX_REPLICA_NUM];
-   std::atomic<uint64_t> lateProbeCommittedFast_;
-   std::atomic<uint64_t> lateProbeCommittedSlow_;
-   std::atomic<uint64_t> lateProbeCommittedFastLate_;
-   std::atomic<uint64_t> lateProbeCommittedSlowLate_;
-   std::atomic<uint64_t> lateProbeTraceNum_;
+   // Headroom/commit probes (controlled by config "probe_lateness": 0=off,
+   // 1=counters+periodic, 2=+per-txn traces). A txn "misses" its headroom at
+   // a replica if it arrived after its deadline (deadline = sendTime + bound).
+   // Commit mode: direct = all hash replies in headroom (1 RTT); sync = reply
+   // held until a follower's sync-point caught up (extra round-trip).
+   int32_t probeLevel_;
+   uint32_t probeTraceCap_;
+   std::mutex probeMtx_;
+   std::unordered_map<uint32_t, int64_t> probeBoundByReqId_;
+   std::atomic<uint64_t> probeReplicaSeen_[MAX_SHARD_NUM][MAX_REPLICA_NUM];
+   std::atomic<uint64_t> probeReplicaMissNum_[MAX_SHARD_NUM]
+                                             [MAX_REPLICA_NUM];
+   std::atomic<int64_t> probeReplicaMaxMissUs_[MAX_SHARD_NUM]
+                                              [MAX_REPLICA_NUM];
+   std::atomic<uint64_t> probeReplicaMissSumUs_[MAX_SHARD_NUM]
+                                               [MAX_REPLICA_NUM];
+   std::atomic<uint64_t> probeDirectCommit_;
+   std::atomic<uint64_t> probeSyncCommit_;
+   std::atomic<uint64_t> probeDirectCommitMiss_;
+   std::atomic<uint64_t> probeSyncCommitMiss_;
+   std::atomic<uint64_t> probeTraceNum_;
    ConcurrentQueue<std::pair<TigaReply, TigaCoordinator*>> replyQu_;
    std::unordered_set<uint32_t> committedCoordReqIds_;
    std::map<uint32_t, TigaFastReplyQuorum>

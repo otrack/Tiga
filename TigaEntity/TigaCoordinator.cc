@@ -111,9 +111,9 @@ void TigaCoordinator::Launch() {
       reqInProcess_.sendTime_ = gInfo_->serverClock_.fetch_add(1);
       reqInProcess_.bound_ = 0;  // bound no longer indicates OWD
    }
-   if (gInfo_->lateProbeLevel_ > 0) {
-      std::lock_guard<std::mutex> lk(gInfo_->lateProbeMtx_);
-      gInfo_->lateProbeBoundByReqId_[reqInProcess_.cmd_.reqId_] =
+   if (gInfo_->probeLevel_ > 0) {
+      std::lock_guard<std::mutex> lk(gInfo_->probeMtx_);
+      gInfo_->probeBoundByReqId_[reqInProcess_.cmd_.reqId_] =
           reqInProcess_.bound_;
    }
    // if (reqInProcess_.cmd_.reqId_ % 1000 == 1) {
@@ -311,19 +311,19 @@ GlobalInfo::GlobalInfo(const uint32_t coordinatorId, const uint32_t shardNum,
    fastReplyNum2_ = 0;
    nFastCommits_ = 0;
    nSlowCommits_ = 0;
-   lateProbeLevel_ = 0;
-   lateProbeTraceCap_ = 500;
-   lateProbeCommittedFast_ = 0;
-   lateProbeCommittedSlow_ = 0;
-   lateProbeCommittedFastLate_ = 0;
-   lateProbeCommittedSlowLate_ = 0;
-   lateProbeTraceNum_ = 0;
+   probeLevel_ = 0;
+   probeTraceCap_ = 500;
+   probeDirectCommit_ = 0;
+   probeSyncCommit_ = 0;
+   probeDirectCommitMiss_ = 0;
+   probeSyncCommitMiss_ = 0;
+   probeTraceNum_ = 0;
    for (uint32_t sid = 0; sid < MAX_SHARD_NUM; sid++) {
       for (uint32_t rid = 0; rid < MAX_REPLICA_NUM; rid++) {
-         lateProbeReplicaTotal_[sid][rid] = 0;
-         lateProbeReplicaLateNum_[sid][rid] = 0;
-         lateProbeReplicaMaxLateUs_[sid][rid] = 0;
-         lateProbeReplicaLateSumUs_[sid][rid] = 0;
+         probeReplicaSeen_[sid][rid] = 0;
+         probeReplicaMissNum_[sid][rid] = 0;
+         probeReplicaMaxMissUs_[sid][rid] = 0;
+         probeReplicaMissSumUs_[sid][rid] = 0;
       }
    }
    debug_ = false;
@@ -351,10 +351,10 @@ GlobalInfo::GlobalInfo(const uint32_t coordinatorId, const uint32_t shardNum,
              << "owdEstimationPercentile_=" << owdEstimationPercentile_;
 
    if (config["probe_lateness"].IsDefined()) {
-      lateProbeLevel_ = config["probe_lateness"].as<int32_t>();
+      probeLevel_ = config["probe_lateness"].as<int32_t>();
    }
    if (config["probe_lateness_trace_cap"].IsDefined()) {
-      lateProbeTraceCap_ = config["probe_lateness_trace_cap"].as<uint32_t>();
+      probeTraceCap_ = config["probe_lateness_trace_cap"].as<uint32_t>();
    }
 
    for (uint32_t sid = 0; sid < MAX_SHARD_NUM; sid++) {
@@ -493,41 +493,41 @@ void GlobalInfo::UpdateQuorumSet() {
          // Quorum Check
          TigaFastReplyQuorum& q = quorumSets_[rep.reqId_];
 
-         if (lateProbeLevel_ > 0) {
+         if (probeLevel_ > 0) {
             int64_t bound = 0;
             bool boundKnown = false;
             {
-               std::lock_guard<std::mutex> lk(lateProbeMtx_);
-               auto it = lateProbeBoundByReqId_.find(rep.reqId_);
-               if (it != lateProbeBoundByReqId_.end()) {
+               std::lock_guard<std::mutex> lk(probeMtx_);
+               auto it = probeBoundByReqId_.find(rep.reqId_);
+               if (it != probeBoundByReqId_.end()) {
                   boundKnown = true;
                   bound = it->second;
                }
             }
             if (boundKnown) {
-               int64_t lateUs = (int64_t)rep.owd_ - bound;
+               int64_t missUs = (int64_t)rep.owd_ - bound;
                uint32_t sidIdx = rep.shardId_ % MAX_SHARD_NUM;
                uint32_t ridIdx = rep.replicaId_ % MAX_REPLICA_NUM;
-               lateProbeReplicaTotal_[sidIdx][ridIdx]++;
-               if (lateUs > 0) {
-                  lateProbeReplicaLateNum_[sidIdx][ridIdx]++;
-                  lateProbeReplicaLateSumUs_[sidIdx][ridIdx] +=
-                      (uint64_t)lateUs;
-                  if (lateProbeReplicaMaxLateUs_[sidIdx][ridIdx].load() <
-                      lateUs) {
-                     lateProbeReplicaMaxLateUs_[sidIdx][ridIdx].store(lateUs);
+               probeReplicaSeen_[sidIdx][ridIdx]++;
+               if (missUs > 0) {
+                  probeReplicaMissNum_[sidIdx][ridIdx]++;
+                  probeReplicaMissSumUs_[sidIdx][ridIdx] +=
+                      (uint64_t)missUs;
+                  if (probeReplicaMaxMissUs_[sidIdx][ridIdx].load() <
+                      missUs) {
+                     probeReplicaMaxMissUs_[sidIdx][ridIdx].store(missUs);
                   }
                   q.lateReplicaNum_++;
                }
-               if (q.lateMaxUs_ < lateUs) {
-                  q.lateMaxUs_ = lateUs;
+               if (q.lateMaxUs_ < missUs) {
+                  q.lateMaxUs_ = missUs;
                }
-               if (lateProbeLevel_ >= 2 &&
-                   lateProbeTraceNum_.fetch_add(1) < lateProbeTraceCap_) {
-                  LOG(INFO) << "[LATE-PROBE-COORD] reply sid=" << rep.shardId_
+               if (probeLevel_ >= 2 &&
+                   probeTraceNum_.fetch_add(1) < probeTraceCap_) {
+                  LOG(INFO) << "[COMMIT-PROBE] reply sid=" << rep.shardId_
                             << " rid=" << rep.replicaId_
                             << " req=" << rep.reqId_ << " owd=" << rep.owd_
-                            << " bound=" << bound << " lateUs=" << lateUs
+                            << " bound=" << bound << " missUs=" << missUs
                             << " hasHash=" << (int)rep.hasHash_;
                }
             }
@@ -551,20 +551,20 @@ void GlobalInfo::UpdateQuorumSet() {
             // LOG(INFO) << "syncStatus=" << currentSyncedLogIds_[0][0] << "-"
             //           << currentSyncedLogIds_[0][1] << "-"
             //           << currentSyncedLogIds_[0][2];
-            if (lateProbeLevel_ > 0) {
+            if (probeLevel_ > 0) {
                if (ret == 1) {
-                  lateProbeCommittedFast_++;
+                  probeDirectCommit_++;
                   if (q.lateReplicaNum_ > 0) {
-                     lateProbeCommittedFastLate_++;
+                     probeDirectCommitMiss_++;
                   }
                } else {
-                  lateProbeCommittedSlow_++;
+                  probeSyncCommit_++;
                   if (q.lateReplicaNum_ > 0) {
-                     lateProbeCommittedSlowLate_++;
+                     probeSyncCommitMiss_++;
                   }
                }
-               std::lock_guard<std::mutex> lk(lateProbeMtx_);
-               lateProbeBoundByReqId_.erase(coordReqId);
+               std::lock_guard<std::mutex> lk(probeMtx_);
+               probeBoundByReqId_.erase(coordReqId);
             }
             committedCoordReqIds_.insert(coordReqId);
             coord->Finish(q);
@@ -656,27 +656,27 @@ void GlobalInfo::CheckQuorum() {
                 << " slow=" << slow
                 << " total=" << total
                 << " fast_pct=" << std::fixed << std::setprecision(1) << ratio << "%";
-      if (lateProbeLevel_ > 0) {
+      if (probeLevel_ > 0) {
          std::string perRep = "";
          for (uint32_t sid = 0; sid < shardNum_; sid++) {
             for (uint32_t rid = 0; rid < replicaNum_; rid++) {
                perRep += std::to_string(sid) + ":" + std::to_string(rid) + "{" +
-                         std::to_string(lateProbeReplicaTotal_[sid][rid].load()) +
+                         std::to_string(probeReplicaSeen_[sid][rid].load()) +
                          "/" +
-                         std::to_string(lateProbeReplicaLateNum_[sid][rid].load()) +
+                         std::to_string(probeReplicaMissNum_[sid][rid].load()) +
                          "/" +
-                         std::to_string(lateProbeReplicaMaxLateUs_[sid][rid].load()) +
+                         std::to_string(probeReplicaMaxMissUs_[sid][rid].load()) +
                          "} ";
             }
          }
-         LOG(INFO) << "[LATE-PROBE-COORD] coordinatorId=" << coordinatorId_
-                   << " perReplica=" << perRep
-                   << " committedFast=" << lateProbeCommittedFast_.load()
-                   << " committedSlow=" << lateProbeCommittedSlow_.load()
-                   << " committedFastLate="
-                   << lateProbeCommittedFastLate_.load()
-                   << " committedSlowLate="
-                   << lateProbeCommittedSlowLate_.load();
+         LOG(INFO) << "[COMMIT-PROBE] coordinatorId=" << coordinatorId_
+<< " perReplica=" << perRep
+                    << " directCommit=" << probeDirectCommit_.load()
+                    << " syncCommit=" << probeSyncCommit_.load()
+                    << " directCommitMiss="
+                    << probeDirectCommitMiss_.load()
+                    << " syncCommitMiss="
+                    << probeSyncCommitMiss_.load();
       }
       markTime_ = GetMicrosecondTimestamp();
    }
@@ -688,21 +688,21 @@ void GlobalInfo::CheckQuorum() {
          int commitStatus = isTxnCommitted(kv.second);
          if (commitStatus > 0) {
             coordReqIdCommitted.push_back(kv.first);
-            if (lateProbeLevel_ > 0) {
+            if (probeLevel_ > 0) {
                TigaFastReplyQuorum& ql = kv.second;
                if (commitStatus == 1) {
-                  lateProbeCommittedFast_++;
+                  probeDirectCommit_++;
                   if (ql.lateReplicaNum_ > 0) {
-                     lateProbeCommittedFastLate_++;
+                     probeDirectCommitMiss_++;
                   }
                } else {
-                  lateProbeCommittedSlow_++;
+                  probeSyncCommit_++;
                   if (ql.lateReplicaNum_ > 0) {
-                     lateProbeCommittedSlowLate_++;
+                     probeSyncCommitMiss_++;
                   }
                }
-               std::lock_guard<std::mutex> lk(lateProbeMtx_);
-               lateProbeBoundByReqId_.erase(kv.first);
+               std::lock_guard<std::mutex> lk(probeMtx_);
+               probeBoundByReqId_.erase(kv.first);
             }
             if (commitStatus == 1) {
                nFastCommits_++;
