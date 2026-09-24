@@ -76,4 +76,6 @@ public class YcsbClient {
   public native int insert(String key, Map<String, String> values);
   public native int transfer(String key1, String key2, String field);
   public native int swap(String[] keys, String field);
+  public native int runSwapOpenLoop(long rate, long maxOutstanding, long runSec, long recordCount, long swapSize);
+  public native int setOpenLoopArrival(long mode);
 }

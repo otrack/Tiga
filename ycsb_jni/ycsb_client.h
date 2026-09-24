@@ -12,13 +12,22 @@ public:
     virtual int execute(uint32_t txnType, const std::string& key, JNIEnv* env, jobject jfields, jobject jmap) = 0;
     virtual int transfer(const std::string& key1, const std::string& key2, const std::string& field, JNIEnv* env) { return -1; }
     virtual int swap(const std::vector<std::string>& keys, const std::string& field, JNIEnv* env) { return -1; }
-};
 
+    virtual int runSwapOpenLoop(uint32_t rate, uint32_t maxOutstanding,
+                                uint32_t runSec, uint32_t recordCount,
+                                uint32_t swapSize) {
+        return -1;
+    }
+
+    // 0 = deterministic arrival, 1 = poisson (exponential inter-arrival).
+    virtual int setOpenLoopArrival(int mode) {
+        return -1;
+    }
+};
 BaseYcsbClient* createTigaClient(const std::string& configPath);
 BaseYcsbClient* createCalvinClient(const std::string& configPath);
 BaseYcsbClient* createDetockClient(const std::string& configPath);
 BaseYcsbClient* createJanusClient(const std::string& configPath);
-
 int32_t hashKey(const std::string& key);
 void populateJavaMap(JNIEnv* env, jobject jmap, const std::string& field, const std::string& value);
 

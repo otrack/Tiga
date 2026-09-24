@@ -145,3 +145,35 @@ JNIEXPORT jint JNICALL Java_com_tiga_ycsb_YcsbClient_swap(JNIEnv *env, jobject o
 
     return client->swap(keys, field, env);
 }
+
+JNIEXPORT jint JNICALL Java_com_tiga_ycsb_YcsbClient_runSwapOpenLoop(JNIEnv *env, jobject obj, jlong jrate, jlong jmaxOutstanding, jlong jrunSec, jlong jrecordCount, jlong jswapSize) {
+    if (!g_fid_clientHandle) {
+        jclass thisClass = env->GetObjectClass(obj);
+        g_fid_clientHandle = env->GetFieldID(thisClass, "clientHandle", "J");
+        env->DeleteLocalRef(thisClass);
+    }
+
+    jlong handle = env->GetLongField(obj, g_fid_clientHandle);
+    BaseYcsbClient* client = reinterpret_cast<BaseYcsbClient*>(handle);
+    if (!client) return -1;
+
+    return client->runSwapOpenLoop(static_cast<uint32_t>(jrate),
+                                   static_cast<uint32_t>(jmaxOutstanding),
+                                   static_cast<uint32_t>(jrunSec),
+                                   static_cast<uint32_t>(jrecordCount),
+                                   static_cast<uint32_t>(jswapSize));
+}
+
+JNIEXPORT jint JNICALL Java_com_tiga_ycsb_YcsbClient_setOpenLoopArrival(JNIEnv *env, jobject obj, jlong jmode) {
+    if (!g_fid_clientHandle) {
+        jclass thisClass = env->GetObjectClass(obj);
+        g_fid_clientHandle = env->GetFieldID(thisClass, "clientHandle", "J");
+        env->DeleteLocalRef(thisClass);
+    }
+
+    jlong handle = env->GetLongField(obj, g_fid_clientHandle);
+    BaseYcsbClient* client = reinterpret_cast<BaseYcsbClient*>(handle);
+    if (!client) return -1;
+
+    return client->setOpenLoopArrival(static_cast<int>(jmode));
+}

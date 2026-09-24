@@ -63,6 +63,22 @@ JNIEXPORT jint JNICALL Java_com_tiga_ycsb_YcsbClient_transfer
 JNIEXPORT jint JNICALL Java_com_tiga_ycsb_YcsbClient_swap
   (JNIEnv *, jobject, jobjectArray, jstring);
 
+/*
+ * Class:     com_tiga_ycsb_YcsbClient
+ * Method:    runSwapOpenLoop
+ * Signature: (JJJJJ)I
+ */
+JNIEXPORT jint JNICALL Java_com_tiga_ycsb_YcsbClient_runSwapOpenLoop
+  (JNIEnv *, jobject, jlong, jlong, jlong, jlong, jlong);
+
+/*
+ * Class:     com_tiga_ycsb_YcsbClient
+ * Method:    setOpenLoopArrival
+ * Signature: (J)I
+ */
+JNIEXPORT jint JNICALL Java_com_tiga_ycsb_YcsbClient_setOpenLoopArrival
+  (JNIEnv *, jobject, jlong);
+
 #ifdef __cplusplus
 }
 #endif
