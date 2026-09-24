@@ -180,10 +180,15 @@ public:
     }
 
     ~TigaYcsbClient() override {
-        delete txnGen_;
+        // Stop daemon/inquiry threads first: they reference comm_ (ProxyAt).
+        info_->Shutdown();
+        // Destroy the communicator (joins its poller thread), so no late RPC
+        // replies can invoke callbacks that touch info_/coord_ afterwards.
+        delete comm_;
+        // Only now is it safe to free the objects those callbacks referenced.
         delete info_;
         delete coord_;
-        delete comm_;
+        delete txnGen_;
     }
 
     int execute(uint32_t txnType, const std::string& key, JNIEnv* env, jobject jfields, jobject jmap) override {

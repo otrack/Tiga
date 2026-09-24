@@ -355,11 +355,19 @@ GlobalInfo::GlobalInfo(const uint32_t coordinatorId, const uint32_t shardNum,
 }
 
 GlobalInfo::~GlobalInfo() {
-   isRunning_ = false;
-   daemonThread_->join();
-   inquiryThread_->join();
+   Shutdown();
    delete daemonThread_;
    delete inquiryThread_;
+}
+
+void GlobalInfo::Shutdown() {
+   isRunning_ = false;
+   if (daemonThread_ && daemonThread_->joinable()) {
+      daemonThread_->join();
+   }
+   if (inquiryThread_ && inquiryThread_->joinable()) {
+      inquiryThread_->join();
+   }
 }
 
 void GlobalInfo::RunDaemon() {

@@ -62,6 +62,7 @@ struct GlobalInfo {
               const uint32_t initBound = 0, const uint32_t yieldPeriodUs = 0,
               TigaCommunicator* comm = NULL);
    ~GlobalInfo();
+   void Shutdown();
    void RunDaemon();
    void RunIniquiry();
    void UpdateOWDStats();
