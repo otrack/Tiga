@@ -7,21 +7,44 @@ enum YCSB_TXN_TYPE {
    YCSB_READ = 1,
    YCSB_UPDATE,
    YCSB_INSERT,
-   YCSB_SWAP = 4
+   YCSB_SWAP = 4,
+   // Locking one-shot transactions, used to decompose a dependent transaction
+   // (e.g., swap) into two one-shot ones (Tiga technical report, Figure 16).
+   // The value of each key in the write-set starts with the lock owner id.
+   YCSB_LOCK_READ = 5,     // ws_[k] = "<owner>"
+   YCSB_WRITE_UNLOCK = 6,  // ws_[k] = "<owner>#<new row>"
+   YCSB_UNLOCK = 7,        // ws_[k] = "<owner>"
 };
+
+// Results of the locking transactions: "1" (+ row for YCSB_LOCK_READ) if the
+// lock is held by the owner, "0" otherwise.
+#define YCSB_LOCK_OK "1"
+#define YCSB_LOCK_FAILED "0"
+// Result key set by YCSB_UPDATE/YCSB_INSERT when a key is locked by another
+// owner (the write is then skipped). Record keys are non-negative.
+#define YCSB_LOCK_CONFLICT_FLAG (-1)
+#define YCSB_NO_OWNER (0)
 
 #include <unordered_map>
 
-struct SpeculativeString {
+// State of a record before a speculative execution, restored on rollback.
+struct YCSBUndoRecord {
    uint64_t txnId_ = UINT64_MAX;
-   std::string value_ = "";
+   std::string row_ = "";
+   uint64_t owner_ = YCSB_NO_OWNER;
 };
 
 class YCSBStateMachine : public StateMachine {
   private:
    std::vector<std::vector<std::string>> kvStore_;
-   // Speculative execution support
-   std::unordered_map<int32_t, SpeculativeString> speculativeVersion_;
+   // Owner of the (exclusive) lock of each record, YCSB_NO_OWNER if free
+   std::vector<uint64_t> lockOwner_;
+   // Speculative execution support: at most one speculative transaction per
+   // key at a time
+   std::unordered_map<int32_t, YCSBUndoRecord> undo_;
+
+   uint32_t MappedRecordId(const int32_t key);
+   std::string& Row(const uint32_t mappedRecordId);
 
   public:
    YCSBStateMachine(const uint32_t shardId, const uint32_t replicaId,

@@ -8,6 +8,8 @@
 #include <chrono>
 #include <atomic>
 #include <thread>
+#include <map>
+#include <condition_variable>
 #include <random>
 #include <algorithm>
 #include <unistd.h>
@@ -27,7 +29,7 @@ class TigaYcsbTxnGenerator : public TxnGenerator {
     void GetTxnReq(ClientRequest *req, uint32_t reqId, uint32_t cid) override {}
 
     bool NeedDisPatch(const ClientRequest &req) override {
-        return req.cmd_.txnType_ == 4; // YCSB_SWAP
+        return req.cmd_.txnType_ == 4; // YCSB_SWAP (legacy, superseded by locking swaps)
     }
 
     void GetInquireKeys(const uint32_t txnType,
@@ -178,12 +180,27 @@ public:
         info_ = new GlobalInfo(coordId, shardNum_, replicaNum_, 400000, 60000, 10000, comm_);
 
         txnGen_ = new TigaYcsbTxnGenerator(shardNum_, replicaNum_, config_);
+
+        if (config_["ycsb"]["lock_retries"].IsDefined()) {
+            lockRetries_ = config_["ycsb"]["lock_retries"].as<uint32_t>();
+        }
+        if (config_["ycsb"]["lock_backoff_us"].IsDefined()) {
+            lockBackoffUs_ = config_["ycsb"]["lock_backoff_us"].as<uint32_t>();
+        }
     }
 
     ~TigaYcsbClient() override {
         stopPump_.store(true);
         if (pumpThread_.joinable()) {
             pumpThread_.join();
+        }
+        {
+            std::lock_guard<std::mutex> lock(chainMtx_);
+            stopChain_ = true;
+        }
+        chainCv_.notify_one();
+        if (chainThread_.joinable()) {
+            chainThread_.join();
         }
         // Stop daemon/inquiry threads first: they reference comm_ (ProxyAt).
         info_->Shutdown();
@@ -238,6 +255,11 @@ public:
             LOG(INFO) << "[YCSB-CLIENT] future resolved #" << curCnt;
         }
 
+        if ((txnType == 2 || txnType == 3) &&
+            reply.result_.find(-1) != reply.result_.end()) { // YCSB_LOCK_CONFLICT_FLAG
+            return -1;
+        }
+
         if (txnType == 1 && jmap) { // Read
             std::string rowStr = "";
             auto it = reply.result_.find(int_key);
@@ -285,37 +307,63 @@ public:
         return 0;
     }
 
+    // Swap as a dependent transaction decomposed into two one-shot ones
+    // (Tiga technical report, Figure 16): T1 locks and reads the keys, T2
+    // writes the rotated values and releases the locks.  If a lock is taken,
+    // the locks are released and T1 is retried after a random backoff.
     int swap(const std::vector<std::string>& keys, const std::string& field, JNIEnv* env) override {
-        ClientRequest req;
-        req.cmd_.clientId_ = info_->coordinatorId_;
-        req.cmd_.reqId_ = info_->nextRequestIdByProxy_.fetch_add(1);
-        req.cmd_.txnType_ = 4; // YCSB_SWAP
-
+        std::vector<int32_t> intKeys;
         for (const auto& key : keys) {
-            int32_t int_key = hashKey(key);
-            req.cmd_.ws_[int_key].set_str("");
-            req.targetShards_.insert(int_key % shardNum_);
+            intKeys.push_back(hashKey(key));
         }
 
         static std::atomic<uint64_t> swapCnt{0};
         uint64_t curCnt = swapCnt.fetch_add(1);
-        if (curCnt < 20) {
-            LOG(INFO) << "[YCSB-CLIENT] swap #" << curCnt
-                      << " keyCount=" << keys.size()
-                      << " targetShardsCount=" << req.targetShards_.size()
-                      << " reqId=" << req.cmd_.reqId_;
-        }
+        uint64_t owner = NextLockOwner();
 
-        ClientReply reply;
-        if (!Submit(req, &reply)) {
-            LOG(WARNING) << "[YCSB-CLIENT] swap timeout #" << curCnt;
-            return -1;
-        }
-        if (curCnt < 20) {
-            LOG(INFO) << "[YCSB-CLIENT] swap future resolved #" << curCnt;
-        }
+        for (uint32_t attempt = 0; attempt <= lockRetries_; attempt++) {
+            if (attempt > 0) {
+                LockBackoff(attempt);
+            }
+            ClientReply reply;
+            if (!Submit(BuildLockRequest(YCSB_LOCK_READ_TXN, intKeys, owner), &reply)) {
+                LOG(WARNING) << "[YCSB-CLIENT] swap lock timeout #" << curCnt;
+                return -1;
+            }
+            std::vector<std::string> rows;
+            if (!ParseLockReadReply(intKeys, reply, &rows)) {
+                ClientReply unlockReply;
+                if (!Submit(BuildLockRequest(YCSB_UNLOCK_TXN, intKeys, owner), &unlockReply)) {
+                    LOG(WARNING) << "[YCSB-CLIENT] swap unlock timeout #" << curCnt;
+                    return -1;
+                }
+                continue;
+            }
 
-        return 0;
+            // keys[(i+1) % S] <- keys[i]
+            std::vector<std::string> newRows(intKeys.size());
+            for (size_t i = 0; i < intKeys.size(); i++) {
+                newRows[(i + 1) % intKeys.size()] = rows[i];
+            }
+            ClientReply writeReply;
+            if (!Submit(BuildWriteUnlockRequest(intKeys, newRows, owner), &writeReply)) {
+                LOG(WARNING) << "[YCSB-CLIENT] swap write timeout #" << curCnt;
+                return -1;
+            }
+            if (!AllLockOk(intKeys, writeReply)) {
+                LOG(WARNING) << "[YCSB-CLIENT] swap lost its locks #" << curCnt;
+                return -1;
+            }
+            if (curCnt < 20) {
+                LOG(INFO) << "[YCSB-CLIENT] swap #" << curCnt
+                          << " keyCount=" << keys.size()
+                          << " attempts=" << attempt + 1;
+            }
+            return 0;
+        }
+        LOG(WARNING) << "[YCSB-CLIENT] swap aborted after " << lockRetries_ + 1
+                     << " attempts #" << curCnt;
+        return -1;
     }
 
     int runSwapOpenLoop(uint32_t rate, uint32_t maxOutstanding, uint32_t runSec,
@@ -324,6 +372,80 @@ public:
     int setOpenLoopArrival(int mode) override;
 
   private:
+    // Transaction types of YCSBStateMachine
+    static const uint32_t YCSB_LOCK_READ_TXN = 5;
+    static const uint32_t YCSB_WRITE_UNLOCK_TXN = 6;
+    static const uint32_t YCSB_UNLOCK_TXN = 7;
+
+    // Retries of a decomposed transaction whose locks are taken, and base of
+    // the (exponential, randomized) backoff between them
+    uint32_t lockRetries_ = 100;
+    uint32_t lockBackoffUs_ = 100;
+    std::atomic<uint32_t> nextLockOwner_{1};
+
+    // Lock owner ids are unique across clients: <coordinator id, counter>
+    uint64_t NextLockOwner() {
+        return ((uint64_t)info_->coordinatorId_ << 32) | nextLockOwner_.fetch_add(1);
+    }
+
+    void LockBackoff(uint32_t attempt) {
+        usleep(LockBackoffUs(attempt));
+    }
+
+    ClientRequest BuildLockRequest(uint32_t txnType, const std::vector<int32_t>& intKeys,
+                                   uint64_t owner) {
+        ClientRequest req;
+        req.cmd_.clientId_ = info_->coordinatorId_;
+        req.cmd_.reqId_ = info_->nextRequestIdByProxy_.fetch_add(1);
+        req.cmd_.txnType_ = txnType;
+        for (int32_t k : intKeys) {
+            req.cmd_.ws_[k].set_str(std::to_string(owner));
+            req.targetShards_.insert(k % shardNum_);
+        }
+        return req;
+    }
+
+    ClientRequest BuildWriteUnlockRequest(const std::vector<int32_t>& intKeys,
+                                          const std::vector<std::string>& rows,
+                                          uint64_t owner) {
+        ClientRequest req = BuildLockRequest(YCSB_WRITE_UNLOCK_TXN, intKeys, owner);
+        for (size_t i = 0; i < intKeys.size(); i++) {
+            req.cmd_.ws_[intKeys[i]].set_str(std::to_string(owner) + "#" + rows[i]);
+        }
+        return req;
+    }
+
+    // Returns true iff all the locks are held; rows then holds the value of
+    // each key (in the order of intKeys).
+    static bool ParseLockReadReply(const std::vector<int32_t>& intKeys,
+                                   const ClientReply& reply,
+                                   std::vector<std::string>* rows) {
+        rows->clear();
+        for (int32_t k : intKeys) {
+            auto it = reply.result_.find(k);
+            if (it == reply.result_.end() || it->second.get_kind() != mdb::Value::STR) {
+                return false;
+            }
+            const std::string& res = it->second.get_str();
+            if (res.empty() || res[0] != '1') {
+                return false;
+            }
+            rows->push_back(res.substr(1));
+        }
+        return true;
+    }
+
+    static bool AllLockOk(const std::vector<int32_t>& intKeys, const ClientReply& reply) {
+        for (int32_t k : intKeys) {
+            auto it = reply.result_.find(k);
+            if (it == reply.result_.end() || it->second.get_kind() != mdb::Value::STR ||
+                it->second.get_str() != "1") {
+                return false;
+            }
+        }
+        return true;
+    }
+
     struct OpenLoopSample {
         uint64_t sendUs_;
         uint64_t commitUs_;
@@ -353,8 +475,69 @@ public:
     TigaCoordinator* PopCoordinator();
     void PushCoordinator(TigaCoordinator* coo);
     bool Submit(ClientRequest& req, ClientReply* reply);
+    bool Submit(ClientRequest&& req, ClientReply* reply) { return Submit(req, reply); }
+    struct OpenLoopOp {
+        std::vector<int32_t> keys_;
+        uint64_t owner_ = 0;
+        uint64_t startUs_ = 0;
+        uint32_t attempt_ = 0;
+    };
+    std::atomic<uint32_t> lockAborts_{0};
+    std::atomic<uint32_t> failed_{0};
+
+    // The steps of an open-loop operation are chained from the callbacks of
+    // the previous ones.  A callback runs inside its coordinator's Finish(), so
+    // it must not submit (DoOne resets the coordinator and replaces the
+    // running callback): it hands the next step over to this thread instead.
+    std::mutex chainMtx_;
+    std::condition_variable chainCv_;
+    std::multimap<uint64_t, std::function<void()>> chainQu_;  // by due time (us)
+    std::thread chainThread_;
+    bool stopChain_ = false;
+
+    void Chain(std::function<void()> step, uint64_t delayUs = 0) {
+        {
+            std::lock_guard<std::mutex> lock(chainMtx_);
+            chainQu_.emplace(GetMicrosecondTimestamp() + delayUs, std::move(step));
+        }
+        chainCv_.notify_one();
+    }
+
+    void ChainTd() {
+        std::unique_lock<std::mutex> lock(chainMtx_);
+        while (true) {
+            if (chainQu_.empty()) {
+                if (stopChain_) return;
+                chainCv_.wait(lock);
+                continue;
+            }
+            uint64_t dueUs = chainQu_.begin()->first;
+            uint64_t nowUs = GetMicrosecondTimestamp();
+            if (dueUs > nowUs) {
+                chainCv_.wait_for(lock, std::chrono::microseconds(dueUs - nowUs));
+                continue;
+            }
+            std::function<void()> step = std::move(chainQu_.begin()->second);
+            chainQu_.erase(chainQu_.begin());
+            lock.unlock();
+            step();
+            lock.lock();
+        }
+    }
+
+    // Random exponential backoff before the attempt-th retry
+    uint64_t LockBackoffUs(uint32_t attempt) {
+        static thread_local std::mt19937 rng(std::random_device{}());
+        uint32_t maxUs = lockBackoffUs_ << std::min<uint32_t>(attempt - 1, 10);
+        return std::uniform_int_distribution<uint32_t>(0, maxUs)(rng);
+    }
+
     void OpenLoopDispatch(TigaCoordinator* coo);
-    void OpenLoopRequestDone(TigaCoordinator* coo);
+    void OpenLoopLock(TigaCoordinator* coo, std::shared_ptr<OpenLoopOp> op);
+    void OpenLoopUnlock(TigaCoordinator* coo, std::shared_ptr<OpenLoopOp> op);
+    void OpenLoopWriteUnlock(TigaCoordinator* coo, std::shared_ptr<OpenLoopOp> op,
+                             const std::vector<std::string>& rows);
+    void OpenLoopRequestDone(TigaCoordinator* coo, std::shared_ptr<OpenLoopOp> op);
     void RunOpenLoop(uint32_t rate, uint32_t maxOutstanding, uint32_t runSec);
     void RunOpenLoopDeterministic(uint32_t rate, uint32_t maxOutstanding,
                                   uint32_t runSec);
@@ -470,11 +653,14 @@ TigaCoordinator* TigaYcsbClient::PopCoordinator() {
     return c;
 }
 
+// An open-loop swap runs the same decomposition as swap(): lock-read, then
+// write-unlock (or unlock and retry), each step on a pooled coordinator and
+// chained (through ChainTd) from the callback of the previous one.  Retries
+// are scheduled after the same random backoff as swap().
 void TigaYcsbClient::OpenLoopDispatch(TigaCoordinator* coo) {
-    ClientRequest req;
-    req.cmd_.clientId_ = info_->coordinatorId_;
-    req.cmd_.reqId_ = info_->nextRequestIdByProxy_.fetch_add(1);
-    req.cmd_.txnType_ = 4;  // YCSB_SWAP
+    auto op = std::make_shared<OpenLoopOp>();
+    op->owner_ = NextLockOwner();
+    op->startUs_ = GetMicrosecondTimestamp();
 
     std::vector<uint64_t> keyNums;
     keyNums.reserve(openLoopSwapSize_);
@@ -487,29 +673,73 @@ void TigaYcsbClient::OpenLoopDispatch(TigaCoordinator* coo) {
         if (!duplicate) keyNums.push_back(n);
     }
     for (uint64_t n : keyNums) {
-        int32_t int_key = hashKey(BuildKeyName(n));
-        req.cmd_.ws_[int_key].set_str("");
-        req.targetShards_.insert(int_key % shardNum_);
+        op->keys_.push_back(hashKey(BuildKeyName(n)));
     }
 
     outstanding_.fetch_add(1);
-    req.callback_ = [this, coo](const ClientReply&) {
-        this->OpenLoopRequestDone(coo);
+    OpenLoopLock(coo, op);
+}
+
+void TigaYcsbClient::OpenLoopLock(TigaCoordinator* coo, std::shared_ptr<OpenLoopOp> op) {
+    ClientRequest req = BuildLockRequest(YCSB_LOCK_READ_TXN, op->keys_, op->owner_);
+    req.callback_ = [this, coo, op](const ClientReply& rep) {
+        std::vector<std::string> rows;
+        bool locked = ParseLockReadReply(op->keys_, rep, &rows);
+        PushCoordinator(coo);
+        if (locked) {
+            std::vector<std::string> newRows(op->keys_.size());
+            for (size_t i = 0; i < op->keys_.size(); i++) {
+                newRows[(i + 1) % op->keys_.size()] = rows[i];
+            }
+            this->Chain([this, op, newRows]() {
+                this->OpenLoopWriteUnlock(PopCoordinator(), op, newRows);
+            });
+        } else {
+            this->Chain([this, op]() { this->OpenLoopUnlock(PopCoordinator(), op); });
+        }
     };
     coo->DoOne(req, txnGen_);
 }
 
-void TigaYcsbClient::OpenLoopRequestDone(TigaCoordinator* coo) {
+void TigaYcsbClient::OpenLoopUnlock(TigaCoordinator* coo, std::shared_ptr<OpenLoopOp> op) {
+    ClientRequest req = BuildLockRequest(YCSB_UNLOCK_TXN, op->keys_, op->owner_);
+    req.callback_ = [this, coo, op](const ClientReply&) {
+        PushCoordinator(coo);
+        lockAborts_.fetch_add(1);
+        if (op->attempt_++ < lockRetries_) {
+            this->Chain([this, op]() { this->OpenLoopLock(PopCoordinator(), op); },
+                        LockBackoffUs(op->attempt_));
+        } else {
+            failed_.fetch_add(1);
+            outstanding_.fetch_sub(1);
+        }
+    };
+    coo->DoOne(req, txnGen_);
+}
+
+void TigaYcsbClient::OpenLoopWriteUnlock(TigaCoordinator* coo, std::shared_ptr<OpenLoopOp> op,
+                                         const std::vector<std::string>& rows) {
+    ClientRequest req = BuildWriteUnlockRequest(op->keys_, rows, op->owner_);
+    req.callback_ = [this, coo, op](const ClientReply& rep) {
+        if (!AllLockOk(op->keys_, rep)) {
+            failed_.fetch_add(1);
+        }
+        this->OpenLoopRequestDone(coo, op);
+    };
+    coo->DoOne(req, txnGen_);
+}
+
+void TigaYcsbClient::OpenLoopRequestDone(TigaCoordinator* coo, std::shared_ptr<OpenLoopOp> op) {
     uint64_t commitUs = GetMicrosecondTimestamp();
-    outstanding_.fetch_sub(1);
     {
         std::lock_guard<std::mutex> lock(samplesMtx_);
-        samples_.push_back({coo->sendTime_, commitUs,
+        samples_.push_back({op->startUs_, commitUs,
                             coo->reqInProcess_.bound_,
                             (uint32_t)coo->detectReplicationInconsistency_,
                             (uint32_t)coo->detectNonSerial_});
     }
     PushCoordinator(coo);
+    outstanding_.fetch_sub(1);
 }
 
 void TigaYcsbClient::RunOpenLoop(uint32_t rate, uint32_t maxOutstanding,
@@ -664,14 +894,16 @@ void TigaYcsbClient::PrintOpenLoopSummary() {
     };
     fprintf(stdout,
             "[OL-SUMMARY] completed=%zu tput_hz=%.2f p50=%llu p90=%llu "
-            "p99=%llu p99_9=%llu max=%llu avg=%.1f repSlow=%u nonSerial=%u\n",
+            "p99=%llu p99_9=%llu max=%llu avg=%.1f repSlow=%u nonSerial=%u "
+            "lockAborts=%u failed=%u\n",
             n, (double)n * 1000000.0 / elapsedUs,
             (unsigned long long)pct(n * 50 / 100),
             (unsigned long long)pct(n * 90 / 100),
             (unsigned long long)pct(n * 99 / 100),
             (unsigned long long)pct(n * 999 / 1000),
             (unsigned long long)(n ? latOf(samples[n - 1]) : 0),
-            n ? (double)sumUs / n : 0.0, repSlowCnt, nonSerialCnt);
+            n ? (double)sumUs / n : 0.0, repSlowCnt, nonSerialCnt,
+            lockAborts_.load(), failed_.load());
     for (size_t i = 0; i < n; i++) {
         fprintf(stdout, "[OL] %llu %d %u %u\n",
                 (unsigned long long)latOf(samples[i]), (int)samples[i].boundUs_,
@@ -702,6 +934,7 @@ int TigaYcsbClient::runSwapOpenLoop(uint32_t rate, uint32_t maxOutstanding,
               << " runSec=" << runSec << " recordCount=" << recordCount
               << " swapSize=" << swapSize
               << " arrivalMode=" << openLoopArrivalMode_;
+    chainThread_ = std::thread([this]() { this->ChainTd(); });
     pumpThread_ = std::thread([this, rate, maxOutstanding, runSec]() {
         this->RunOpenLoop(rate, maxOutstanding, runSec);
     });

@@ -1,4 +1,4 @@
-load("@rules_cc//cc:defs.bzl", "cc_library", "cc_binary")
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_binary", "cc_test")
 
 
 
@@ -88,3 +88,11 @@ cc_library(
     visibility = ["//visibility:public"],
 )
 
+
+cc_test(
+    name = "YCSBStateMachineTest",
+    srcs = ["YCSBStateMachineTest.cc"],
+    deps = [
+        ":YCSBStateMachine",
+    ],
+)
