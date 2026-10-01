@@ -308,17 +308,65 @@ public:
     }
 
     // Swap as a dependent transaction decomposed into two one-shot ones
-    // (Tiga technical report, Figure 16): T1 locks and reads the keys, T2
-    // writes the rotated values and releases the locks.  If a lock is taken,
-    // the locks are released and T1 is retried after a random backoff.
+    // (Tiga technical report, Figure 16), see LockedReadModifyWrite.
     int swap(const std::vector<std::string>& keys, const std::string& field, JNIEnv* env) override {
+        return LockedReadModifyWrite("swap", keys,
+            [](const std::vector<std::string>& rows, std::vector<std::string>* newRows) {
+                // keys[(i+1) % S] <- keys[i]
+                for (size_t i = 0; i < rows.size(); i++) {
+                    (*newRows)[(i + 1) % rows.size()] = rows[i];
+                }
+                return 1;
+            });
+    }
+
+    // Calvin micro-benchmark transaction (SIGMOD'12, Section 6.2): read the
+    // counters, and if their sum is non-negative, increment each of them.
+    // Same decomposition as swap.
+    int checkAndIncrement(const std::vector<std::string>& keys, const std::string& field,
+                          JNIEnv* env) override {
+        return LockedReadModifyWrite("checkAndIncrement", keys,
+            [&field](const std::vector<std::string>& rows, std::vector<std::string>* newRows) {
+                std::vector<std::map<std::string, std::string>> rowMaps(rows.size());
+                std::vector<long long> values(rows.size());
+                long long sum = 0;
+                for (size_t i = 0; i < rows.size(); i++) {
+                    deserializeMap(rows[i], rowMaps[i]);
+                    auto it = rowMaps[i].find(field);
+                    try {
+                        values[i] = (it == rowMaps[i].end()) ? 0 : std::stoll(it->second);
+                    } catch (...) {
+                        return -1;
+                    }
+                    sum += values[i];
+                }
+                if (sum < 0) {
+                    return 0;  // constraint fails: commit without writing
+                }
+                for (size_t i = 0; i < rows.size(); i++) {
+                    rowMaps[i][field] = std::to_string(values[i] + 1);
+                    (*newRows)[i] = serializeMap(rowMaps[i]);
+                }
+                return 1;
+            });
+    }
+
+    // A dependent transaction over keys, decomposed into two one-shot ones
+    // (Tiga technical report, Figure 16): T1 locks and reads the keys, then
+    // compute(rows, newRows) returns 1 to write newRows, 0 to write nothing or
+    // -1 on error, and T2 writes (or not) and releases the locks.  If a lock
+    // is taken, the locks are released and T1 is retried after a random
+    // backoff.  Returns 0 on success.
+    int LockedReadModifyWrite(
+        const char* name, const std::vector<std::string>& keys,
+        const std::function<int(const std::vector<std::string>&, std::vector<std::string>*)>& compute) {
         std::vector<int32_t> intKeys;
         for (const auto& key : keys) {
             intKeys.push_back(hashKey(key));
         }
 
-        static std::atomic<uint64_t> swapCnt{0};
-        uint64_t curCnt = swapCnt.fetch_add(1);
+        static std::atomic<uint64_t> txnCnt{0};
+        uint64_t curCnt = txnCnt.fetch_add(1);
         uint64_t owner = NextLockOwner();
 
         for (uint32_t attempt = 0; attempt <= lockRetries_; attempt++) {
@@ -327,41 +375,42 @@ public:
             }
             ClientReply reply;
             if (!Submit(BuildLockRequest(YCSB_LOCK_READ_TXN, intKeys, owner), &reply)) {
-                LOG(WARNING) << "[YCSB-CLIENT] swap lock timeout #" << curCnt;
+                LOG(WARNING) << "[YCSB-CLIENT] " << name << " lock timeout #" << curCnt;
                 return -1;
             }
             std::vector<std::string> rows;
-            if (!ParseLockReadReply(intKeys, reply, &rows)) {
+            bool locked = ParseLockReadReply(intKeys, reply, &rows);
+            std::vector<std::string> newRows(intKeys.size());
+            int ret = locked ? compute(rows, &newRows) : 0;
+            if (!locked || ret != 1) {
                 ClientReply unlockReply;
                 if (!Submit(BuildLockRequest(YCSB_UNLOCK_TXN, intKeys, owner), &unlockReply)) {
-                    LOG(WARNING) << "[YCSB-CLIENT] swap unlock timeout #" << curCnt;
+                    LOG(WARNING) << "[YCSB-CLIENT] " << name << " unlock timeout #" << curCnt;
                     return -1;
                 }
-                continue;
+                if (!locked) {
+                    continue;
+                }
+                return ret == 0 ? 0 : -1;
             }
 
-            // keys[(i+1) % S] <- keys[i]
-            std::vector<std::string> newRows(intKeys.size());
-            for (size_t i = 0; i < intKeys.size(); i++) {
-                newRows[(i + 1) % intKeys.size()] = rows[i];
-            }
             ClientReply writeReply;
             if (!Submit(BuildWriteUnlockRequest(intKeys, newRows, owner), &writeReply)) {
-                LOG(WARNING) << "[YCSB-CLIENT] swap write timeout #" << curCnt;
+                LOG(WARNING) << "[YCSB-CLIENT] " << name << " write timeout #" << curCnt;
                 return -1;
             }
             if (!AllLockOk(intKeys, writeReply)) {
-                LOG(WARNING) << "[YCSB-CLIENT] swap lost its locks #" << curCnt;
+                LOG(WARNING) << "[YCSB-CLIENT] " << name << " lost its locks #" << curCnt;
                 return -1;
             }
             if (curCnt < 20) {
-                LOG(INFO) << "[YCSB-CLIENT] swap #" << curCnt
+                LOG(INFO) << "[YCSB-CLIENT] " << name << " #" << curCnt
                           << " keyCount=" << keys.size()
                           << " attempts=" << attempt + 1;
             }
             return 0;
         }
-        LOG(WARNING) << "[YCSB-CLIENT] swap aborted after " << lockRetries_ + 1
+        LOG(WARNING) << "[YCSB-CLIENT] " << name << " aborted after " << lockRetries_ + 1
                      << " attempts #" << curCnt;
         return -1;
     }
@@ -584,6 +633,11 @@ class TigaYcsbClientRef : public BaseYcsbClient {
 
     int swap(const std::vector<std::string>& keys, const std::string& field, JNIEnv* env) override {
         return client_->swap(keys, field, env);
+    }
+
+    int checkAndIncrement(const std::vector<std::string>& keys, const std::string& field,
+                          JNIEnv* env) override {
+        return client_->checkAndIncrement(keys, field, env);
     }
 
     int runSwapOpenLoop(uint32_t rate, uint32_t maxOutstanding, uint32_t runSec,

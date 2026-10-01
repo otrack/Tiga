@@ -12,6 +12,7 @@ public:
     virtual int execute(uint32_t txnType, const std::string& key, JNIEnv* env, jobject jfields, jobject jmap) = 0;
     virtual int transfer(const std::string& key1, const std::string& key2, const std::string& field, JNIEnv* env) { return -1; }
     virtual int swap(const std::vector<std::string>& keys, const std::string& field, JNIEnv* env) { return -1; }
+    virtual int checkAndIncrement(const std::vector<std::string>& keys, const std::string& field, JNIEnv* env) { return -1; }
 
     virtual int runSwapOpenLoop(uint32_t rate, uint32_t maxOutstanding,
                                 uint32_t runSec, uint32_t recordCount,

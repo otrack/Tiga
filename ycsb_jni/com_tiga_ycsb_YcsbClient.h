@@ -65,6 +65,14 @@ JNIEXPORT jint JNICALL Java_com_tiga_ycsb_YcsbClient_swap
 
 /*
  * Class:     com_tiga_ycsb_YcsbClient
+ * Method:    checkAndIncrement
+ * Signature: ([Ljava/lang/String;Ljava/lang/String;)I
+ */
+JNIEXPORT jint JNICALL Java_com_tiga_ycsb_YcsbClient_checkAndIncrement
+  (JNIEnv *, jobject, jobjectArray, jstring);
+
+/*
+ * Class:     com_tiga_ycsb_YcsbClient
  * Method:    runSwapOpenLoop
  * Signature: (JJJJJ)I
  */

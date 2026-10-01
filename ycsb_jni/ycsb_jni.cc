@@ -121,19 +121,7 @@ JNIEXPORT jint JNICALL Java_com_tiga_ycsb_YcsbClient_transfer(JNIEnv *env, jobje
     return client->transfer(key1, key2, field, env);
 }
 
-JNIEXPORT jint JNICALL Java_com_tiga_ycsb_YcsbClient_swap(JNIEnv *env, jobject obj, jobjectArray jkeys, jstring jfield) {
-    if (!g_fid_clientHandle) {
-        jclass thisClass = env->GetObjectClass(obj);
-        g_fid_clientHandle = env->GetFieldID(thisClass, "clientHandle", "J");
-        env->DeleteLocalRef(thisClass);
-    }
-
-    jlong handle = env->GetLongField(obj, g_fid_clientHandle);
-    BaseYcsbClient* client = reinterpret_cast<BaseYcsbClient*>(handle);
-    if (!client) return -1;
-
-    std::string field = jstring2string(env, jfield);
-
+static std::vector<std::string> jstringArray2vector(JNIEnv *env, jobjectArray jkeys) {
     jsize len = env->GetArrayLength(jkeys);
     std::vector<std::string> keys;
     keys.reserve(len);
@@ -142,8 +130,29 @@ JNIEXPORT jint JNICALL Java_com_tiga_ycsb_YcsbClient_swap(JNIEnv *env, jobject o
         keys.push_back(jstring2string(env, jkey));
         env->DeleteLocalRef(jkey);
     }
+    return keys;
+}
 
-    return client->swap(keys, field, env);
+static BaseYcsbClient* getClient(JNIEnv *env, jobject obj) {
+    if (!g_fid_clientHandle) {
+        jclass thisClass = env->GetObjectClass(obj);
+        g_fid_clientHandle = env->GetFieldID(thisClass, "clientHandle", "J");
+        env->DeleteLocalRef(thisClass);
+    }
+    jlong handle = env->GetLongField(obj, g_fid_clientHandle);
+    return reinterpret_cast<BaseYcsbClient*>(handle);
+}
+
+JNIEXPORT jint JNICALL Java_com_tiga_ycsb_YcsbClient_swap(JNIEnv *env, jobject obj, jobjectArray jkeys, jstring jfield) {
+    BaseYcsbClient* client = getClient(env, obj);
+    if (!client) return -1;
+    return client->swap(jstringArray2vector(env, jkeys), jstring2string(env, jfield), env);
+}
+
+JNIEXPORT jint JNICALL Java_com_tiga_ycsb_YcsbClient_checkAndIncrement(JNIEnv *env, jobject obj, jobjectArray jkeys, jstring jfield) {
+    BaseYcsbClient* client = getClient(env, obj);
+    if (!client) return -1;
+    return client->checkAndIncrement(jstringArray2vector(env, jkeys), jstring2string(env, jfield), env);
 }
 
 JNIEXPORT jint JNICALL Java_com_tiga_ycsb_YcsbClient_runSwapOpenLoop(JNIEnv *env, jobject obj, jlong jrate, jlong jmaxOutstanding, jlong jrunSec, jlong jrecordCount, jlong jswapSize) {
