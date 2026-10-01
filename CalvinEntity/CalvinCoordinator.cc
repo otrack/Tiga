@@ -140,7 +140,11 @@ void CalvinCoordinator::OnDispatchReply(const uint32_t phase,
    assert(phase == phase_);
    assert(stage_ == STAGE::Dispatching);
    if (!rep.result_.empty()) {
-      reqInProcess_.ws_.insert(rep.result_.begin(), rep.result_.end());
+      // Overwrite: the keys being pre-read are already in the write-set (with
+      // placeholder values), and std::map::insert would keep the placeholders.
+      for (auto& kv : rep.result_) {
+         reqInProcess_.ws_[kv.first] = kv.second;
+      }
    }
    dispatchShards_.insert(rep.shardId_);
    if (dispatchShards_.size() == targetShards_.size()) {

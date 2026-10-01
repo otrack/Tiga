@@ -153,6 +153,11 @@ void YCSBStateMachine::PreRead(const uint32_t txnType,
       for (auto& kv : *input) {
          int32_t key = kv.first;
          uint32_t int_key = key;
+         // The dispatch request carries all the keys of the transaction: only
+         // answer for the ones stored on this shard.
+         if (int_key % shardNum_ != shardId_) {
+            continue;
+         }
          uint32_t fieldId = 0;
          uint32_t mappedRecordId =
              int_key / shardNum_ + YCSB_MAX_KEY_NUM / shardNum_ * shardId_;
