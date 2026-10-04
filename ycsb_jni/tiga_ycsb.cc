@@ -151,7 +151,7 @@ void deserializeMap(const std::string& str, std::map<std::string, std::string>& 
 
 } // namespace
 
-class TigaYcsbClient : public BaseYcsbClient {
+class TigaYcsbClient {
 public:
     YAML::Node config_;
     TigaCommunicator* comm_;
@@ -187,9 +187,12 @@ public:
         if (config_["ycsb"]["lock_backoff_us"].IsDefined()) {
             lockBackoffUs_ = config_["ycsb"]["lock_backoff_us"].as<uint32_t>();
         }
+        if (config_["ycsb"]["io_lanes"].IsDefined()) {
+            ioLanes_ = config_["ycsb"]["io_lanes"].as<uint32_t>();
+        }
     }
 
-    ~TigaYcsbClient() override {
+    ~TigaYcsbClient() {
         stopPump_.store(true);
         if (pumpThread_.joinable()) {
             pumpThread_.join();
@@ -215,7 +218,7 @@ public:
         delete txnGen_;
     }
 
-    int execute(uint32_t txnType, const std::string& key, JNIEnv* env, jobject jfields, jobject jmap) override {
+    int execute(uint32_t lane, uint32_t txnType, const std::string& key, JNIEnv* env, jobject jfields, jobject jmap) {
         int32_t record_id = hashKey(key);
         int32_t int_key = record_id;
 
@@ -247,7 +250,7 @@ public:
         }
 
         ClientReply reply;
-        if (!Submit(req, &reply)) {
+        if (!Submit(lane, req, &reply)) {
             LOG(WARNING) << "[YCSB-CLIENT] execute timeout #" << curCnt;
             return -1;
         }
@@ -284,7 +287,7 @@ public:
         return 0;
     }
 
-    int transfer(const std::string& key1, const std::string& key2, const std::string& field, JNIEnv* env) override {
+    int transfer(uint32_t lane, const std::string& key1, const std::string& key2, const std::string& field, JNIEnv* env) {
         int32_t rec1 = hashKey(key1);
         int32_t rec2 = hashKey(key2);
 
@@ -300,7 +303,7 @@ public:
         req.targetShards_.insert(rec2 % shardNum_);
 
         ClientReply reply;
-        if (!Submit(req, &reply)) {
+        if (!Submit(lane, req, &reply)) {
             LOG(WARNING) << "[YCSB-CLIENT] transfer timeout";
             return -1;
         }
@@ -309,8 +312,8 @@ public:
 
     // Swap as a dependent transaction decomposed into two one-shot ones
     // (Tiga technical report, Figure 16), see LockedReadModifyWrite.
-    int swap(const std::vector<std::string>& keys, const std::string& field, JNIEnv* env) override {
-        return LockedReadModifyWrite("swap", keys,
+    int swap(uint32_t lane, const std::vector<std::string>& keys, const std::string& field, JNIEnv* env) {
+        return LockedReadModifyWrite(lane, "swap", keys,
             [](const std::vector<std::string>& rows, std::vector<std::string>* newRows) {
                 // keys[(i+1) % S] <- keys[i]
                 for (size_t i = 0; i < rows.size(); i++) {
@@ -323,9 +326,9 @@ public:
     // Calvin micro-benchmark transaction (SIGMOD'12, Section 6.2): read the
     // counters, and if their sum is non-negative, increment each of them.
     // Same decomposition as swap.
-    int checkAndIncrement(const std::vector<std::string>& keys, const std::string& field,
-                          JNIEnv* env) override {
-        return LockedReadModifyWrite("checkAndIncrement", keys,
+    int checkAndIncrement(uint32_t lane, const std::vector<std::string>& keys,
+                          const std::string& field, JNIEnv* env) {
+        return LockedReadModifyWrite(lane, "checkAndIncrement", keys,
             [&field](const std::vector<std::string>& rows, std::vector<std::string>* newRows) {
                 std::vector<std::map<std::string, std::string>> rowMaps(rows.size());
                 std::vector<long long> values(rows.size());
@@ -358,7 +361,7 @@ public:
     // is taken, the locks are released and T1 is retried after a random
     // backoff.  Returns 0 on success.
     int LockedReadModifyWrite(
-        const char* name, const std::vector<std::string>& keys,
+        uint32_t lane, const char* name, const std::vector<std::string>& keys,
         const std::function<int(const std::vector<std::string>&, std::vector<std::string>*)>& compute) {
         std::vector<int32_t> intKeys;
         for (const auto& key : keys) {
@@ -374,7 +377,7 @@ public:
                 LockBackoff(attempt);
             }
             ClientReply reply;
-            if (!Submit(BuildLockRequest(YCSB_LOCK_READ_TXN, intKeys, owner), &reply)) {
+            if (!Submit(lane, BuildLockRequest(YCSB_LOCK_READ_TXN, intKeys, owner), &reply)) {
                 LOG(WARNING) << "[YCSB-CLIENT] " << name << " lock timeout #" << curCnt;
                 return -1;
             }
@@ -384,7 +387,7 @@ public:
             int ret = locked ? compute(rows, &newRows) : 0;
             if (!locked || ret != 1) {
                 ClientReply unlockReply;
-                if (!Submit(BuildLockRequest(YCSB_UNLOCK_TXN, intKeys, owner), &unlockReply)) {
+                if (!Submit(lane, BuildLockRequest(YCSB_UNLOCK_TXN, intKeys, owner), &unlockReply)) {
                     LOG(WARNING) << "[YCSB-CLIENT] " << name << " unlock timeout #" << curCnt;
                     return -1;
                 }
@@ -395,7 +398,7 @@ public:
             }
 
             ClientReply writeReply;
-            if (!Submit(BuildWriteUnlockRequest(intKeys, newRows, owner), &writeReply)) {
+            if (!Submit(lane, BuildWriteUnlockRequest(intKeys, newRows, owner), &writeReply)) {
                 LOG(WARNING) << "[YCSB-CLIENT] " << name << " write timeout #" << curCnt;
                 return -1;
             }
@@ -416,9 +419,11 @@ public:
     }
 
     int runSwapOpenLoop(uint32_t rate, uint32_t maxOutstanding, uint32_t runSec,
-                        uint32_t recordCount, uint32_t swapSize) override;
+                        uint32_t recordCount, uint32_t swapSize);
 
-    int setOpenLoopArrival(int mode) override;
+    int setOpenLoopArrival(int mode);
+
+    uint32_t AcquireLane();
 
   private:
     // Transaction types of YCSBStateMachine
@@ -505,7 +510,12 @@ public:
 
     std::mutex poolMtx_;
     std::vector<TigaCoordinator*> poolCreated_;
-    std::vector<TigaCoordinator*> poolFree_;
+    std::map<uint32_t, std::vector<TigaCoordinator*>> poolFree_;  // by lane
+    // Communicator lanes: by default, one per handle (i.e., per YCSB thread),
+    // like the clients of the other protocols; ycsb.io_lanes caps their
+    // number, the handles then share them round-robin.
+    uint32_t ioLanes_ = 0;
+    uint32_t handleNum_ = 0;
     std::atomic<int32_t> outstanding_{0};
     std::vector<OpenLoopSample> samples_;
     std::mutex samplesMtx_;
@@ -521,10 +531,13 @@ public:
         return "user" + std::to_string(n);
     }
 
-    TigaCoordinator* PopCoordinator();
+    // The open-loop pump runs on lane 0.
+    TigaCoordinator* PopCoordinator(uint32_t lane = 0);
     void PushCoordinator(TigaCoordinator* coo);
-    bool Submit(ClientRequest& req, ClientReply* reply);
-    bool Submit(ClientRequest&& req, ClientReply* reply) { return Submit(req, reply); }
+    bool Submit(uint32_t lane, ClientRequest& req, ClientReply* reply);
+    bool Submit(uint32_t lane, ClientRequest&& req, ClientReply* reply) {
+        return Submit(lane, req, reply);
+    }
     struct OpenLoopOp {
         std::vector<int32_t> keys_;
         uint64_t owner_ = 0;
@@ -605,7 +618,8 @@ namespace {
 // YCSB creates one DB (hence one native client) per worker thread.  A
 // TigaYcsbClient owns a communicator, a GlobalInfo and their threads, so all
 // the handles of a JVM share a single one; each in-flight request gets its own
-// pooled TigaCoordinator instead.
+// pooled TigaCoordinator instead.  Each handle sends on its own communicator
+// lane (poller thread and connections), see AcquireLane.
 std::mutex sharedMtx;
 TigaYcsbClient* sharedClient = nullptr;
 std::string sharedConfigPath;
@@ -613,7 +627,7 @@ uint32_t sharedRefs = 0;
 
 class TigaYcsbClientRef : public BaseYcsbClient {
   public:
-    explicit TigaYcsbClientRef(TigaYcsbClient* client) : client_(client) {}
+    TigaYcsbClientRef(TigaYcsbClient* client, uint32_t lane) : client_(client), lane_(lane) {}
 
     ~TigaYcsbClientRef() override {
         std::lock_guard<std::mutex> lock(sharedMtx);
@@ -624,20 +638,20 @@ class TigaYcsbClientRef : public BaseYcsbClient {
     }
 
     int execute(uint32_t txnType, const std::string& key, JNIEnv* env, jobject jfields, jobject jmap) override {
-        return client_->execute(txnType, key, env, jfields, jmap);
+        return client_->execute(lane_, txnType, key, env, jfields, jmap);
     }
 
     int transfer(const std::string& key1, const std::string& key2, const std::string& field, JNIEnv* env) override {
-        return client_->transfer(key1, key2, field, env);
+        return client_->transfer(lane_, key1, key2, field, env);
     }
 
     int swap(const std::vector<std::string>& keys, const std::string& field, JNIEnv* env) override {
-        return client_->swap(keys, field, env);
+        return client_->swap(lane_, keys, field, env);
     }
 
     int checkAndIncrement(const std::vector<std::string>& keys, const std::string& field,
                           JNIEnv* env) override {
-        return client_->checkAndIncrement(keys, field, env);
+        return client_->checkAndIncrement(lane_, keys, field, env);
     }
 
     int runSwapOpenLoop(uint32_t rate, uint32_t maxOutstanding, uint32_t runSec,
@@ -651,6 +665,7 @@ class TigaYcsbClientRef : public BaseYcsbClient {
 
   private:
     TigaYcsbClient* client_;
+    uint32_t lane_;
 };
 
 } // namespace
@@ -665,25 +680,38 @@ BaseYcsbClient* createTigaClient(const std::string& configPath) {
                      << ", sharing the client built from " << sharedConfigPath;
     }
     sharedRefs++;
-    return new TigaYcsbClientRef(sharedClient);
+    return new TigaYcsbClientRef(sharedClient, sharedClient->AcquireLane());
+}
+
+// Called under sharedMtx, once per handle
+uint32_t TigaYcsbClient::AcquireLane() {
+    uint32_t handle = handleNum_++;
+    uint32_t laneNum = comm_->LaneNum();
+    if (handle < laneNum) {
+        return handle;
+    }
+    if (ioLanes_ == 0 || laneNum < ioLanes_) {
+        return comm_->AddLane();
+    }
+    return handle % laneNum;
 }
 
 void TigaYcsbClient::PushCoordinator(TigaCoordinator* coo) {
     std::lock_guard<std::mutex> lock(poolMtx_);
-    poolFree_.push_back(coo);
+    poolFree_[coo->lane_].push_back(coo);
 }
 
 // Runs req on a pooled coordinator and waits for its reply.  On timeout the
 // coordinator is not returned to the pool: a late commit would otherwise fire
 // the callback of whichever request reuses it.  It is freed at teardown.
-bool TigaYcsbClient::Submit(ClientRequest& req, ClientReply* reply) {
+bool TigaYcsbClient::Submit(uint32_t lane, ClientRequest& req, ClientReply* reply) {
     auto promise = std::make_shared<std::promise<ClientReply>>();
     auto future = promise->get_future();
     req.callback_ = [promise](const ClientReply& rep) {
         try { promise->set_value(rep); } catch (const std::future_error&) {}
     };
 
-    TigaCoordinator* coo = PopCoordinator();
+    TigaCoordinator* coo = PopCoordinator(lane);
     coo->DoOne(req, txnGen_);
 
     if (future.wait_for(std::chrono::seconds(30)) == std::future_status::timeout) {
@@ -694,15 +722,17 @@ bool TigaYcsbClient::Submit(ClientRequest& req, ClientReply* reply) {
     return true;
 }
 
-TigaCoordinator* TigaYcsbClient::PopCoordinator() {
+TigaCoordinator* TigaYcsbClient::PopCoordinator(uint32_t lane) {
     std::lock_guard<std::mutex> lock(poolMtx_);
-    if (!poolFree_.empty()) {
-        TigaCoordinator* c = poolFree_.back();
-        poolFree_.pop_back();
+    std::vector<TigaCoordinator*>& free = poolFree_[lane];
+    if (!free.empty()) {
+        TigaCoordinator* c = free.back();
+        free.pop_back();
         return c;
     }
     TigaCoordinator* c = new TigaCoordinator(info_->coordinatorId_, config_);
     c->SetGlobalInfo(info_);
+    c->lane_ = lane;
     poolCreated_.push_back(c);
     return c;
 }

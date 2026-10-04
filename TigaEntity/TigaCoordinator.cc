@@ -63,7 +63,7 @@ void TigaCoordinator::Dispatch() {
              this->OnDispatchReply(currentPhase, rep);
           };
       fuattr.callback = cb;
-      Future::safe_release(gInfo_->comm_->ProxyAt(sid, leaderRid)
+      Future::safe_release(gInfo_->comm_->ProxyAt(sid, leaderRid, lane_)
                                ->async_DispatchRequest(dispatchReq, fuattr));
    }
 }
@@ -164,7 +164,7 @@ void TigaCoordinator::Launch() {
          //           ":"
          //           << rid;
          Future::safe_release(
-             gInfo_->comm_->ProxyAt(sid, rid)->async_NormalRequest(
+             gInfo_->comm_->ProxyAt(sid, rid, lane_)->async_NormalRequest(
                  reqInProcess_, fuattr));
       }
    }

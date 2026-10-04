@@ -128,6 +128,7 @@ class TigaCoordinator {
    TxnGenerator* txnGen_;
    uint32_t clientId_;
    uint32_t requestIdByClient_;
+   uint32_t lane_{0};  // communicator lane the requests are sent on
    bool detectReplicationInconsistency_;
    bool detectNonSerial_;
    std::function<void(const ClientReply& rep)> callback_;
