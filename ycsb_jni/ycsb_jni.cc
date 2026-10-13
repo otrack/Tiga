@@ -155,6 +155,12 @@ JNIEXPORT jint JNICALL Java_com_tiga_ycsb_YcsbClient_checkAndIncrement(JNIEnv *e
     return client->checkAndIncrement(jstringArray2vector(env, jkeys), jstring2string(env, jfield), env);
 }
 
+JNIEXPORT jint JNICALL Java_com_tiga_ycsb_YcsbClient_increment(JNIEnv *env, jobject obj, jobjectArray jkeys, jstring jfield) {
+    BaseYcsbClient* client = getClient(env, obj);
+    if (!client) return -1;
+    return client->increment(jstringArray2vector(env, jkeys), jstring2string(env, jfield), env);
+}
+
 JNIEXPORT jint JNICALL Java_com_tiga_ycsb_YcsbClient_runSwapOpenLoop(JNIEnv *env, jobject obj, jlong jrate, jlong jmaxOutstanding, jlong jrunSec, jlong jrecordCount, jlong jswapSize) {
     if (!g_fid_clientHandle) {
         jclass thisClass = env->GetObjectClass(obj);

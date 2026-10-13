@@ -20,6 +20,43 @@ uint64_t ParseOwner(const Value& v, std::string* row = nullptr) {
    }
 }
 
+// Increment the numeric field of a row, stored as the YCSB client serializes
+// it ("<field>:<value>|" for each field, in field order), a missing field
+// counting as 0. Returns false, leaving the row unchanged, if the value of
+// the field is not a number.
+bool IncrementField(std::string& row, const std::string& field) {
+   std::map<std::string, std::string> fields;
+   size_t last = 0, next;
+   while ((next = row.find('|', last)) != std::string::npos) {
+      std::string pair = row.substr(last, next - last);
+      size_t colon = pair.find(':');
+      if (colon != std::string::npos) {
+         fields[pair.substr(0, colon)] = pair.substr(colon + 1);
+      }
+      last = next + 1;
+   }
+   long long value = 0;
+   auto it = fields.find(field);
+   if (it != fields.end()) {
+      try {
+         size_t parsed = 0;
+         value = std::stoll(it->second, &parsed);
+         if (parsed != it->second.size()) {
+            return false;
+         }
+      } catch (...) {
+         return false;
+      }
+   }
+   fields[field] = std::to_string(value + 1);
+   std::string newRow;
+   for (const auto& [k, v] : fields) {
+      newRow += k + ":" + v + "|";
+   }
+   row = newRow;
+   return true;
+}
+
 }  // namespace
 
 YCSBStateMachine::YCSBStateMachine(const uint32_t shardId,
@@ -113,6 +150,17 @@ void YCSBStateMachine::Execute(const uint32_t txnType,
          } else {
             (*output)[key].set_str(YCSB_LOCK_FAILED);
          }
+      } else if (txnType == YCSB_TXN_TYPE::YCSB_INCREMENT) {
+         if (lockOwner != YCSB_NO_OWNER) {
+            // Locked by a decomposed transaction: skip the write
+            (*output)[YCSB_LOCK_CONFLICT_FLAG].set_i32(1);
+            continue;
+         }
+         if (!IncrementField(row, (*input)[key].get_str())) {
+            (*output)[YCSB_INCREMENT_ERROR_FLAG].set_i32(1);
+            continue;
+         }
+         (*output)[key].set_str(row);
       } else if (txnType == YCSB_TXN_TYPE::YCSB_UNLOCK) {
          uint64_t owner = ParseOwner((*input)[key]);
          if (owner != YCSB_NO_OWNER && lockOwner == owner) {

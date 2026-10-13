@@ -354,6 +354,34 @@ public:
             });
     }
 
+    // Calvin micro-benchmark transaction without its constraint check:
+    // increment the counter of each record in a single one-shot transaction,
+    // computed by the state machine (YCSB_INCREMENT), with no read by the
+    // client and no lock.
+    int increment(uint32_t lane, const std::vector<std::string>& keys,
+                  const std::string& field, JNIEnv* env) {
+        ClientRequest req;
+        req.cmd_.clientId_ = info_->coordinatorId_;
+        req.cmd_.reqId_ = info_->nextRequestIdByProxy_.fetch_add(1);
+        req.cmd_.txnType_ = YCSB_INCREMENT_TXN;
+        for (const auto& key : keys) {
+            int32_t rec = hashKey(key);
+            req.cmd_.ws_[rec].set_str(field);
+            req.targetShards_.insert(rec % shardNum_);
+        }
+
+        ClientReply reply;
+        if (!Submit(lane, req, &reply)) {
+            LOG(WARNING) << "[YCSB-CLIENT] increment timeout";
+            return -1;
+        }
+        if (reply.result_.find(-1) != reply.result_.end() ||  // YCSB_LOCK_CONFLICT_FLAG
+            reply.result_.find(-2) != reply.result_.end()) {  // YCSB_INCREMENT_ERROR_FLAG
+            return -1;
+        }
+        return 0;
+    }
+
     // A dependent transaction over keys, decomposed into two one-shot ones
     // (Tiga technical report, Figure 16): T1 locks and reads the keys, then
     // compute(rows, newRows) returns 1 to write newRows, 0 to write nothing or
@@ -430,6 +458,7 @@ public:
     static const uint32_t YCSB_LOCK_READ_TXN = 5;
     static const uint32_t YCSB_WRITE_UNLOCK_TXN = 6;
     static const uint32_t YCSB_UNLOCK_TXN = 7;
+    static const uint32_t YCSB_INCREMENT_TXN = 8;
 
     // Retries of a decomposed transaction whose locks are taken, and base of
     // the (exponential, randomized) backoff between them
@@ -652,6 +681,11 @@ class TigaYcsbClientRef : public BaseYcsbClient {
     int checkAndIncrement(const std::vector<std::string>& keys, const std::string& field,
                           JNIEnv* env) override {
         return client_->checkAndIncrement(lane_, keys, field, env);
+    }
+
+    int increment(const std::vector<std::string>& keys, const std::string& field,
+                  JNIEnv* env) override {
+        return client_->increment(lane_, keys, field, env);
     }
 
     int runSwapOpenLoop(uint32_t rate, uint32_t maxOutstanding, uint32_t runSec,

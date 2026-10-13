@@ -14,15 +14,23 @@ enum YCSB_TXN_TYPE {
    YCSB_LOCK_READ = 5,     // ws_[k] = "<owner>"
    YCSB_WRITE_UNLOCK = 6,  // ws_[k] = "<owner>#<new row>"
    YCSB_UNLOCK = 7,        // ws_[k] = "<owner>"
+   // One-shot increment of a numeric field of each record (e.g., the counters
+   // of the Calvin micro-benchmark), computed by the state machine, so that
+   // it needs neither reads by the client nor locks.
+   YCSB_INCREMENT = 8,     // ws_[k] = "<field>"
 };
 
 // Results of the locking transactions: "1" (+ row for YCSB_LOCK_READ) if the
 // lock is held by the owner, "0" otherwise.
 #define YCSB_LOCK_OK "1"
 #define YCSB_LOCK_FAILED "0"
-// Result key set by YCSB_UPDATE/YCSB_INSERT when a key is locked by another
-// owner (the write is then skipped). Record keys are non-negative.
+// Result key set by YCSB_UPDATE/YCSB_INSERT/YCSB_INCREMENT when a key is
+// locked by another owner (the write is then skipped). Record keys are
+// non-negative.
 #define YCSB_LOCK_CONFLICT_FLAG (-1)
+// Result key set by YCSB_INCREMENT when the field of a record is not a number
+// (the record is then left unchanged).
+#define YCSB_INCREMENT_ERROR_FLAG (-2)
 #define YCSB_NO_OWNER (0)
 
 #include <unordered_map>
