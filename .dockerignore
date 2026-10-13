@@ -1,0 +1,7 @@
+# Not needed to build the image: version control, Bazel's convenience symlinks
+# into the host's cache, and the artefacts of local (Maven, Python) builds.
+.git
+bazel-*
+ycsb_jni/target
+**/__pycache__
+**/*.pyc
