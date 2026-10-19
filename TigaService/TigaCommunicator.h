@@ -25,6 +25,8 @@ class TigaCommunicator {
    std::string serverAddrs_[MAX_SHARD_NUM][MAX_REPLICA_NUM];
    std::mutex laneMtx_;
    std::atomic<Lane*> lanes_[MAX_LANE_NUM];
+   // Lanes reserved by AddLane (their index), and lanes ready to be used
+   uint32_t laneReserved_ = 0;
    std::atomic<uint32_t> laneNum_;
 
   public:
@@ -32,9 +34,13 @@ class TigaCommunicator {
    YAML::Node Config();
    // Connects lane 0
    void Connect();
-   // Connects a new lane and returns its index
+   // Connects a new lane and returns its index.  The connections are made in
+   // parallel, and AddLane may itself be called from several threads at once.
    uint32_t AddLane();
+   // The number of lanes that are connected
    uint32_t LaneNum();
+   // Waits until lane l, which another thread is adding, is connected
+   void WaitLane(const uint32_t l);
    TigaProxy* ProxyAt(const uint32_t shardId, const uint32_t replicaId,
                       const uint32_t lane = 0);
    ~TigaCommunicator();

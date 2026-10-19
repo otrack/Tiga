@@ -8,7 +8,7 @@
 
 namespace rrr {
 
-int Log::level_s = Log::DEBUG;
+int Log::level_s = Log::INFO;
 FILE* Log::fp_s = stdout;
 pthread_mutex_t Log::m_s = PTHREAD_MUTEX_INITIALIZER;
 

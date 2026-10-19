@@ -545,6 +545,8 @@ public:
     // number, the handles then share them round-robin.
     uint32_t ioLanes_ = 0;
     uint32_t handleNum_ = 0;
+    uint32_t lanesStarted_ = 1;  // lane 0 is connected at creation
+    std::mutex laneMtx_;
     std::atomic<int32_t> outstanding_{0};
     std::vector<OpenLoopSample> samples_;
     std::mutex samplesMtx_;
@@ -656,7 +658,7 @@ uint32_t sharedRefs = 0;
 
 class TigaYcsbClientRef : public BaseYcsbClient {
   public:
-    TigaYcsbClientRef(TigaYcsbClient* client, uint32_t lane) : client_(client), lane_(lane) {}
+    TigaYcsbClientRef(TigaYcsbClient* client) : client_(client) {}
 
     ~TigaYcsbClientRef() override {
         std::lock_guard<std::mutex> lock(sharedMtx);
@@ -667,25 +669,25 @@ class TigaYcsbClientRef : public BaseYcsbClient {
     }
 
     int execute(uint32_t txnType, const std::string& key, JNIEnv* env, jobject jfields, jobject jmap) override {
-        return client_->execute(lane_, txnType, key, env, jfields, jmap);
+        return client_->execute(lane(), txnType, key, env, jfields, jmap);
     }
 
     int transfer(const std::string& key1, const std::string& key2, const std::string& field, JNIEnv* env) override {
-        return client_->transfer(lane_, key1, key2, field, env);
+        return client_->transfer(lane(), key1, key2, field, env);
     }
 
     int swap(const std::vector<std::string>& keys, const std::string& field, JNIEnv* env) override {
-        return client_->swap(lane_, keys, field, env);
+        return client_->swap(lane(), keys, field, env);
     }
 
     int checkAndIncrement(const std::vector<std::string>& keys, const std::string& field,
                           JNIEnv* env) override {
-        return client_->checkAndIncrement(lane_, keys, field, env);
+        return client_->checkAndIncrement(lane(), keys, field, env);
     }
 
     int increment(const std::vector<std::string>& keys, const std::string& field,
                   JNIEnv* env) override {
-        return client_->increment(lane_, keys, field, env);
+        return client_->increment(lane(), keys, field, env);
     }
 
     int runSwapOpenLoop(uint32_t rate, uint32_t maxOutstanding, uint32_t runSec,
@@ -698,8 +700,18 @@ class TigaYcsbClientRef : public BaseYcsbClient {
     }
 
   private:
+    // The lane is acquired, hence connected, when the handle first sends: a
+    // thread that has not started yet (see calvin.ramp) does not cost a lane.
+    // A handle belongs to a single thread.
+    uint32_t lane() {
+        if (lane_ == UINT32_MAX) {
+            lane_ = client_->AcquireLane();
+        }
+        return lane_;
+    }
+
     TigaYcsbClient* client_;
-    uint32_t lane_;
+    uint32_t lane_ = UINT32_MAX;
 };
 
 } // namespace
@@ -714,20 +726,33 @@ BaseYcsbClient* createTigaClient(const std::string& configPath) {
                      << ", sharing the client built from " << sharedConfigPath;
     }
     sharedRefs++;
-    return new TigaYcsbClientRef(sharedClient, sharedClient->AcquireLane());
+    return new TigaYcsbClientRef(sharedClient);
 }
 
-// Called under sharedMtx, once per handle
+// Called once per handle, on its first request.  Lane 0 is connected at
+// creation; the others are connected here, by the threads that need them and
+// in parallel.
 uint32_t TigaYcsbClient::AcquireLane() {
-    uint32_t handle = handleNum_++;
-    uint32_t laneNum = comm_->LaneNum();
-    if (handle < laneNum) {
-        return handle;
+    uint32_t handle;
+    bool add = false;
+    {
+        std::lock_guard<std::mutex> lock(laneMtx_);
+        handle = handleNum_++;
+        if (handle > 0 && (ioLanes_ == 0 || lanesStarted_ < ioLanes_)) {
+            lanesStarted_++;
+            add = true;
+        }
     }
-    if (ioLanes_ == 0 || laneNum < ioLanes_) {
+    if (handle == 0) {
+        return 0;
+    }
+    if (add) {
         return comm_->AddLane();
     }
-    return handle % laneNum;
+    // All the lanes are being added: share one, once it is connected
+    uint32_t lane = handle % ioLanes_;
+    comm_->WaitLane(lane);
+    return lane;
 }
 
 void TigaYcsbClient::PushCoordinator(TigaCoordinator* coo) {
